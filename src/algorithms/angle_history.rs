@@ -2,13 +2,14 @@
 use std::collections::HashMap;
 
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState}, util::{helpers::{angle_delta}, nocrex::jankguard::JankGuard}
+    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
+    util::{helpers::angle_delta, nocrex::jankguard::JankGuard},
 };
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
 
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
@@ -44,52 +45,39 @@ impl<'a> CheatAlgorithm<'a> for AngleHistory {
         "angle_history"
     }
 
-    fn on_tick(
-        &mut self,
-        state: &CheatAnalyserState,
-        _: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+        self.jg.on_tick(state).context(format!("jankguard errored in on_tick with state {:?}", state))?;
         let ticknum = u32::from(state.tick);
         let players = &state.players;
-        
-        let tick_window: i32 = get_parameter_value(&self.params, "tick_window");
-        let max_delta_first_third: f32 = get_parameter_value(&self.params, "max_delta_first_third");
-        let min_delta_second_third: f32 = get_parameter_value(&self.params, "min_delta_second_third");
+
+        let tick_window: i32 = get_parameter_value(&self.params, "tick_window")?;
+        let max_delta_first_third: f32 = get_parameter_value(&self.params, "max_delta_first_third")?;
+        let min_delta_second_third: f32 = get_parameter_value(&self.params, "min_delta_second_third")?;
 
         self.ticks.insert(0, HashMap::new());
         self.ticks.truncate(tick_window as usize);
 
-        for player in players.iter().filter(|p| {
-            p.in_pvs
-            && p.state == PlayerState::Alive
-            && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-        }) {
-
+        for player in players
+            .iter()
+            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
+        {
             let info = match &player.info {
                 Some(info) => info,
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).unwrap());
+            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
 
-            let ticks_since_event = self
-                .jg
-                .teleported(&steam_id, ticknum)
-                .min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
                 if ticks_since_event == 0 {
-                    self.detections
-                        .retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
+                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
                 }
                 continue;
             }
 
-            self.ticks
-                .get_mut(0)
-                .unwrap()
-                .insert(steam_id, player.clone());
+            self.ticks.get_mut(0).context("no first tick in AngleHistory")?.insert(steam_id, player.clone());
 
             let current_angle = (player.view_angle, player.pitch_angle);
 
@@ -97,7 +85,6 @@ impl<'a> CheatAlgorithm<'a> for AngleHistory {
             let mut delta_one = 0.0;
 
             for i in 1..self.ticks.len() {
-
                 let past_player = match self.ticks.get(i).and_then(|m| m.get(&steam_id)) {
                     Some(p) => p,
                     None => continue,
@@ -118,8 +105,7 @@ impl<'a> CheatAlgorithm<'a> for AngleHistory {
             }
 
             if let Some(i) = match_index {
-
-                let mid = (1 + i) / 2;
+                let mid = i.div_ceil(2);
                 let mut mids = vec![mid];
 
                 if (i - 1) % 2 != 0 {
@@ -127,15 +113,11 @@ impl<'a> CheatAlgorithm<'a> for AngleHistory {
                 }
 
                 for m in &mids {
-
                     if let Some(mid_player) = self.ticks.get(*m).and_then(|map| map.get(&steam_id)) {
-
                         let mid_angle = (mid_player.view_angle, mid_player.pitch_angle);
                         let mid_delta = angle_delta(current_angle, mid_angle);
 
-                        if mid_delta > min_delta_second_third 
-                            && self.jg.fired(&steam_id, ticknum) <= (i as u32 + 5) {
-
+                        if mid_delta > min_delta_second_third && self.jg.fired(&steam_id, ticknum) <= (i as u32 + 5) {
                             self.detections.push(Detection {
                                 tick: ticknum,
                                 algorithm: self.algorithm_name().to_string(),

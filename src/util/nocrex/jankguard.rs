@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
+use anyhow::Context;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 
@@ -24,10 +25,7 @@ pub struct JankGuard {
 
 impl JankGuard {
     pub fn teleported(&self, player: &u64, tick: u32) -> u32 {
-        tick - self
-            .player_data
-            .get(player)
-            .map_or(0, |pd| pd.last_teleport)
+        tick - self.player_data.get(player).map_or(0, |pd| pd.last_teleport)
     }
 
     pub fn spawned(&self, player: &u64, tick: u32) -> u32 {
@@ -39,10 +37,7 @@ impl JankGuard {
     }
 
     pub fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
-        Ok(vec![
-            tf_demo_parser::MessageType::GameEvent,
-            tf_demo_parser::MessageType::TempEntities,
-        ])
+        Ok(vec![tf_demo_parser::MessageType::GameEvent, tf_demo_parser::MessageType::TempEntities])
     }
 
     pub fn on_message(
@@ -53,9 +48,7 @@ impl JankGuard {
         tick: tf_demo_parser::demo::data::DemoTick,
     ) {
         match message {
-            tf_demo_parser::demo::message::Message::GameEvent(
-                tf_demo_parser::demo::message::GameEventMessage { event, .. },
-            ) => match event {
+            tf_demo_parser::demo::message::Message::GameEvent(tf_demo_parser::demo::message::GameEventMessage { event, .. }) => match event {
                 tf_demo_parser::demo::gamevent::GameEvent::PlayerSpawn(spawn) => {
                     if let Some(id) = state.get_id64_from_userid(spawn.user_id.into()) {
                         self.player_data.entry(id).or_default().last_spawn = tick.into();
@@ -78,20 +71,14 @@ impl JankGuard {
                 for event in &msg.events {
                     let class = &parser_state.server_classes[usize::from(event.class_id)].name;
                     if matches!(class.as_str(), "CTEFireBullets" | "CTEPlayerAnimEvent") {
-                        const BULLETS_PLAYER: SendPropIdentifier =
-                            SendPropIdentifier::new("DT_TEFireBullets", "m_iPlayer");
-                        const ANIM_PLAYER: SendPropIdentifier =
-                            SendPropIdentifier::new("DT_TEPlayerAnimEvent", "m_hPlayer");
+                        const BULLETS_PLAYER: SendPropIdentifier = SendPropIdentifier::new("DT_TEFireBullets", "m_iPlayer");
+                        const ANIM_PLAYER: SendPropIdentifier = SendPropIdentifier::new("DT_TEPlayerAnimEvent", "m_hPlayer");
 
-                        if let Some(prop) = event
-                            .props
-                            .iter()
-                            .find(|p| matches!(p.identifier, BULLETS_PLAYER | ANIM_PLAYER))
-                        {
+                        if let Some(prop) = event.props.iter().find(|p| matches!(p.identifier, BULLETS_PLAYER | ANIM_PLAYER)) {
                             if let Some(id64) = i64::try_from(&prop.value)
                                 .ok()
                                 .and_then(|id| id.try_into().ok())
-                                .map(|id|crate::util::helpers::handle_to_entid(id))
+                                .map(crate::util::helpers::handle_to_entid)
                                 .and_then(|id| state.entid_to_userid.get(&id))
                                 .and_then(|uid| state.userid_to_id64.get(uid))
                             {
@@ -105,19 +92,19 @@ impl JankGuard {
         }
     }
 
-    pub fn on_tick(&mut self, state: &CheatAnalyserState) {
+    pub fn on_tick(&mut self, state: &CheatAnalyserState) -> anyhow::Result<()> {
         let mut states = HashMap::new();
-        for player in state.players.iter().filter(|p| {
-            p.in_pvs
-                && p.state == PlayerState::Alive
-                && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-        }) {
+        for player in state
+            .players
+            .iter()
+            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
+        {
             let info = match &player.info {
                 Some(info) => info,
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).unwrap());
+            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
 
             let player_data = self.player_data.entry(steam_id).or_default();
             let prev_player = player_data.prev_state.as_ref();
@@ -133,7 +120,8 @@ impl JankGuard {
             states.insert(steam_id, player.clone());
         }
         for (steam_id, player_data) in self.player_data.iter_mut() {
-            player_data.prev_state = states.remove(&steam_id);
+            player_data.prev_state = states.remove(steam_id);
         }
+        Ok(())
     }
 }

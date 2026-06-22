@@ -1,8 +1,11 @@
-use anyhow::Error;
+use crate::{
+    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
+    util::helpers::viewangle_delta,
+};
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
-use crate::{base::cheat_analyser_base::{CheatAnalyserState, PlayerState}, util::helpers::viewangle_delta};
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 
@@ -22,10 +25,14 @@ pub struct ViewAngles180Degrees {
 
 impl ViewAngles180Degrees {
     pub fn new() -> Self {
-        let analyser: ViewAngles180Degrees = ViewAngles180Degrees { 
-            previous: None,
-        };
+        let analyser: ViewAngles180Degrees = ViewAngles180Degrees { previous: None };
         analyser
+    }
+}
+
+impl Default for ViewAngles180Degrees {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -56,12 +63,13 @@ impl<'a> CheatAlgorithm<'a> for ViewAngles180Degrees {
         // - In PVS (data is being sent to the client)
         // - Alive (you can't cheat if you're dead)
         // - Not a tf_bot (you can't convict a tf_bot)
-        for player in players.iter().filter(|p| {
-            p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-        }) {
+        for player in players
+            .iter()
+            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
+        {
             let info = match &player.info {
                 Some(info) => info,
-                None => {continue}
+                None => continue,
             };
 
             let steam_id = &info.steam_id;
@@ -73,29 +81,29 @@ impl<'a> CheatAlgorithm<'a> for ViewAngles180Degrees {
                 }
             };
 
-            let (va_delta, pa_delta) = self.previous.as_ref()
-                .map_or((f32::NAN, f32::NAN), |prev_state| {
-                    match prev_state.players.iter().find(|p| {
-                        p.in_pvs && p.state == PlayerState::Alive &&
-                        p.info.as_ref().is_some_and(|i| i.steam_id == *steam_id)
-                    }) {
-                        Some(prev_player) => {
-                            let prev_viewangle = prev_player.view_angle;
-                            let prev_pitchangle = prev_player.pitch_angle;
-                            viewangle_delta(player.view_angle, player.pitch_angle, prev_viewangle, prev_pitchangle, tick_delta)
-                        },
-                        None => (f32::NAN, f32::NAN)
+            let (va_delta, pa_delta) = self.previous.as_ref().map_or((f32::NAN, f32::NAN), |prev_state| {
+                match prev_state
+                    .players
+                    .iter()
+                    .find(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|i| i.steam_id == *steam_id))
+                {
+                    Some(prev_player) => {
+                        let prev_viewangle = prev_player.view_angle;
+                        let prev_pitchangle = prev_player.pitch_angle;
+                        viewangle_delta(player.view_angle, player.pitch_angle, prev_viewangle, prev_pitchangle, tick_delta)
                     }
-                });
+                    None => (f32::NAN, f32::NAN),
+                }
+            });
             // Creating the detection object
             // Avoid creating multiple detection objects for the same player and tick.
             // Nothing will break if you do, but it will overrepresent the data point.
             if va_delta.abs() >= 180.0 || pa_delta.abs() >= 180.0 {
-                detections.push(Detection { 
+                detections.push(Detection {
                     tick: ticknum,
                     algorithm: self.algorithm_name().to_string(),
-                    player: u64::from(SteamID::from_steam3(&steam_id).unwrap()),
-                    data: json!({ "va_delta": va_delta, "pa_delta": pa_delta })
+                    player: u64::from(SteamID::from_steam3(steam_id).context(format!("invalid steam_id3: {:?}", steam_id))?),
+                    data: json!({ "va_delta": va_delta, "pa_delta": pa_delta }),
                 });
             }
         }

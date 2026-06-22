@@ -3,13 +3,14 @@
 use std::collections::HashMap;
 
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState}, util::{helpers::viewangle_delta, nocrex::jankguard::JankGuard}
+    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
+    util::{helpers::viewangle_delta, nocrex::jankguard::JankGuard},
 };
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
 
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
@@ -45,47 +46,38 @@ impl<'a> CheatAlgorithm<'a> for AngleRepeat {
         "nocrex/angle_repeat"
     }
 
-    fn on_tick(
-        &mut self,
-        state: &CheatAnalyserState,
-        _: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+        self.jg.on_tick(state).context(format!("jankguard errored in on_tick with state {:?}", state))?;
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
         self.ticks.insert(0, (ticknum, HashMap::new()));
         self.ticks.truncate(3);
-        
-        let min_angle_diff_ratio: f32 = get_parameter_value(&self.params, "min_angle_diff_ratio");
-        let min_first_second_angle_delta: f32 = get_parameter_value(&self.params, "min_first_second_angle_delta");
-        let max_first_third_angle_delta: f32 = get_parameter_value(&self.params, "max_first_third_angle_delta");
 
-        for player in players.iter().filter(|p| {
-            p.in_pvs
-                && p.state == PlayerState::Alive
-                && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-        }) {
+        let min_angle_diff_ratio: f32 = get_parameter_value(&self.params, "min_angle_diff_ratio")?;
+        let min_first_second_angle_delta: f32 = get_parameter_value(&self.params, "min_first_second_angle_delta")?;
+        let max_first_third_angle_delta: f32 = get_parameter_value(&self.params, "max_first_third_angle_delta")?;
+
+        for player in players
+            .iter()
+            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
+        {
             let info = match &player.info {
                 Some(info) => info,
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).unwrap());
+            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
 
             let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, p.clone())));
             let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, p.clone())));
 
-            let ticks_since_event = self
-                .jg
-                .teleported(&steam_id, ticknum)
-                .min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
                 // Ignore detections +-60 ticks from a teleport or spawn event
                 if ticks_since_event == 0 {
-                    self.detections
-                        .retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
+                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
                 }
                 continue;
             }
@@ -93,9 +85,9 @@ impl<'a> CheatAlgorithm<'a> for AngleRepeat {
             let third_angle = (player.view_angle, player.pitch_angle);
             self.ticks
                 .get_mut(0)
-                .unwrap()
+                .context("no first tick in AngleRepeat")?
                 .1
-                .insert(steam_id.clone(), player.clone()); // Store angle for this tick for next ticks
+                .insert(steam_id, player.clone()); // Store angle for this tick for next ticks
 
             if let (Some((second_t, second_data)), Some((first_t, first_data))) = (prev_data, second_prev_data) {
                 let first_angle = (first_data.view_angle, first_data.pitch_angle);
@@ -103,9 +95,9 @@ impl<'a> CheatAlgorithm<'a> for AngleRepeat {
 
                 let calc_real_delta = |t_old: u32, a_old: (f32, f32), t_new: u32, a_new: (f32, f32)| -> f32 {
                     let tick_delta = t_new.saturating_sub(t_old);
-                    
+
                     let (va_real, pa_real) = viewangle_delta(a_new.0, a_new.1, a_old.0, a_old.1, tick_delta);
-                    
+
                     (va_real * va_real + pa_real * pa_real).sqrt()
                 };
 
@@ -119,10 +111,7 @@ impl<'a> CheatAlgorithm<'a> for AngleRepeat {
 
                 let ratio = first_second_delta / first_third_delta.max(1.0);
 
-                if first_third_delta <= max_first_third_angle_delta
-                    && ratio > min_angle_diff_ratio
-                    && self.jg.fired(&steam_id, ticknum) < 3
-                {
+                if first_third_delta <= max_first_third_angle_delta && ratio > min_angle_diff_ratio && self.jg.fired(&steam_id, ticknum) < 3 {
                     self.detections.push(Detection {
                         tick: ticknum,
                         algorithm: self.algorithm_name().to_string(),

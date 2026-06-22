@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -13,6 +14,14 @@ pub enum Parameter {
 pub enum ParameterError {
     TypeMismatch,
 }
+
+impl Display for ParameterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "type mismatch")
+    }
+}
+
+impl std::error::Error for ParameterError {}
 
 impl TryFrom<&Parameter> for f32 {
     type Error = ParameterError;
@@ -134,15 +143,13 @@ pub type Parameters = HashMap<String, Parameter>;
 // Maps algorithm names to their parameters.
 pub type Config = HashMap<String, Parameters>;
 
-pub fn get_parameter_value<T>(params: &Parameters, param_name: &str) -> T
+pub fn get_parameter_value<T>(params: &Parameters, param_name: &str) -> anyhow::Result<T>
 where
     T: for<'a> TryFrom<&'a Parameter, Error = ParameterError>,
 {
-    match params.get(param_name) {
-        Some(param) => match T::try_from(param) {
-            Ok(value) => value,
-            Err(_) => panic!("Parameter {} has wrong type", param_name),
-        },
-        None => panic!("Parameter {} not found", param_name),
-    }
+    params
+        .get(param_name)
+        .context(format!("Parameter {} not found", param_name))?
+        .try_into()
+        .context(format!("Parameter {} could not be converted to the expected type.", param_name))
 }

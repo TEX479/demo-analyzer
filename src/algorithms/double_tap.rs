@@ -29,13 +29,12 @@ impl DoubleTap {
                 ("min_tick_heavy".to_string(), Parameter::Int(3)),
             ]),
             shots: HashMap::new(),
-            ..Default::default()
         }
     }
 }
 
 fn is_cleaver_or_wrap_assassin(weapon_id: u32, damage: u32) -> bool {
-    (weapon_id == 16 && damage <= 8 && damage >= 3) || (weapon_id == 16 && damage == 50)
+    weapon_id == 16 && (damage == 50 || (3..=8).contains(&damage))
 }
 
 impl<'a> CheatAlgorithm<'a> for DoubleTap {
@@ -47,11 +46,7 @@ impl<'a> CheatAlgorithm<'a> for DoubleTap {
         "doubletap"
     }
 
-    fn on_tick(
-        &mut self,
-        _: &CheatAnalyserState,
-        _: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, _: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         Ok(vec![])
     }
 
@@ -72,9 +67,9 @@ impl<'a> CheatAlgorithm<'a> for DoubleTap {
 
         if let Message::GameEvent(event_msg) = message {
             if let GameEvent::PlayerHurt(hurt) = &event_msg.event {
-                let assert_pvs: bool = get_parameter_value(&self.params, "assert_pvs");
-                let min_tick_scout: i32 = get_parameter_value(&self.params, "min_tick_scout");
-                let min_tick_heavy: i32 = get_parameter_value(&self.params, "min_tick_heavy");
+                let assert_pvs: bool = get_parameter_value(&self.params, "assert_pvs")?;
+                let min_tick_scout: i32 = get_parameter_value(&self.params, "min_tick_scout")?;
+                let min_tick_heavy: i32 = get_parameter_value(&self.params, "min_tick_heavy")?;
 
                 // format;
                 // weapon id, min ticks
@@ -100,11 +95,9 @@ impl<'a> CheatAlgorithm<'a> for DoubleTap {
                 for player in &state.players {
                     if let Some(info) = &player.info {
                         if u32::from(info.user_id) == attacker_uid {
-                            attacker_sid =
-                                u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
+                            attacker_sid = u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
                         } else if u32::from(info.user_id) == victim_uid {
-                            victim_sid =
-                                u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
+                            victim_sid = u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
                         }
                     }
                 }
@@ -113,10 +106,9 @@ impl<'a> CheatAlgorithm<'a> for DoubleTap {
                 }
 
                 let attacker = match players.iter().find(|x| {
-                    x.info.as_ref().is_some_and(|info| {
-                        u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default())
-                            == attacker_sid
-                    })
+                    x.info
+                        .as_ref()
+                        .is_some_and(|info| u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default()) == attacker_sid)
                 }) {
                     Some(p) => p,
                     None => return Ok(vec![]),
@@ -154,7 +146,7 @@ impl<'a> CheatAlgorithm<'a> for DoubleTap {
                 let diff = ticknum - past_tick;
 
                 if diff < min_diff && diff > 0 {
-                    let u200b = "​";
+                    let u200b = "\u{200b}";
                     let data: Vec<(&str, Value)> = vec![
                         ("class", Value::from(attacker.class.to_string())),
                         ("tick_1", Value::from(past_tick)),

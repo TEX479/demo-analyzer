@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
 
-use anyhow::Error;
+use anyhow::{Context, Error};
 use tf_demo_parser::ParserState;
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
 
 #[allow(dead_code)]
 pub struct WriteToFile {
@@ -18,48 +18,41 @@ pub struct WriteToFile {
 }
 
 impl WriteToFile {
-
-    fn write_states_to_file(&mut self) {
+    fn write_states_to_file(&mut self) -> anyhow::Result<()> {
         if self.first_write {
             self.first_write = false;
         } else {
-            writeln!(self.file.as_mut().unwrap(), ",").unwrap();
+            writeln!(self.file.as_mut().context("WriteToFile.file was expected to be Some but is None")?, ",")
+                .context(format!("could not write to {:?}", self.file))?;
         }
 
-        let out = self.state_history.iter()
-            .map(|j| {
-                serde_json::to_string(&j).unwrap()
-            })
-            .collect::<Vec<String>>().join(",\n"); 
-    
-        write!(self.file.as_mut().unwrap(), "{}", out).unwrap();
+        let out = self
+            .state_history
+            .iter()
+            .map(|j| serde_json::to_string(&j).context(format!("could not serialize {:?}", j)))
+            .collect::<Result<Vec<String>, _>>()?
+            .join(",\n");
+
+        write!(self.file.as_mut().context("WriteToFile.file was expected to be Some but is None")?, "{}", out)
+            .context(format!("could not write to {:?}", self.file))?;
         self.state_history.clear();
+        Ok(())
     }
 
-    pub fn init_file(&mut self, file_path: &str) {
-        self.file = Some(match fs::File::create(file_path) {
-            Ok(file) => file,
-            Err(err) => {
-                if err.kind() != std::io::ErrorKind::AlreadyExists {
-                    panic!("Error creating file: {}", err);
-                }
-                fs::remove_file(file_path).unwrap();
-                fs::File::create(file_path).unwrap()
-            }
-        });
+    pub fn init_file(&mut self, file_path: &str) -> anyhow::Result<()> {
+        self.file = Some(fs::File::create(file_path).context(format!("could not create file {:?}", file_path))?);
+        Ok(())
     }
 
-    pub fn new () -> WriteToFile {
-        let params = HashMap::from([
-            ("write_batch_size".to_string(), Parameter::Int(1024))
-        ]);
-        let write_batch_size: i32 = get_parameter_value(&params, "write_batch_size");
-        WriteToFile {
+    pub fn new() -> anyhow::Result<WriteToFile> {
+        let params = HashMap::from([("write_batch_size".to_string(), Parameter::Int(1024))]);
+        let write_batch_size: i32 = get_parameter_value(&params, "write_batch_size")?;
+        Ok(WriteToFile {
             state_history: Vec::with_capacity(write_batch_size as usize),
             file: None,
             first_write: true,
-            params
-        }
+            params,
+        })
     }
 }
 
@@ -74,30 +67,31 @@ impl CheatAlgorithm<'_> for WriteToFile {
     }
 
     fn init(&mut self) -> Result<(), Error> {
-        self.init_file("./output/write_to_file.json");
+        self.init_file("./output/write_to_file.json")
+            .context("could not initialize file at './output/write_to_file.json'")?;
 
-        writeln!(self.file.as_mut().unwrap(), "[").unwrap();
-
-        Ok(())
+        writeln!(self.file.as_mut().context("WriteToFile.file was expected to be Some but is None")?, "[")
+            .context(format!("could not write to {:?}", self.file))
     }
-    
+
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         self.state_history.push(state.clone());
-        let write_batch_size: i32 = get_parameter_value(&self.params, "write_batch_size");
+        let write_batch_size: i32 = get_parameter_value(&self.params, "write_batch_size")?;
         if self.state_history.len() > write_batch_size as usize {
-            self.write_states_to_file();
+            self.write_states_to_file().context("could not write states to file")?;
         }
 
         Ok(vec![])
     }
 
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
-        if self.state_history.len() > 0 {
-            self.write_states_to_file();
+        if !self.state_history.is_empty() {
+            self.write_states_to_file().context("could not write states to file")?;
         }
 
-        writeln!(self.file.as_mut().unwrap(), "\n]").unwrap();
-        let _ = self.file.as_mut().unwrap().flush();
+        writeln!(self.file.as_mut().context("WriteToFile.file was expected to be Some but is None")?, "\n]")
+            .context(format!("could not write to file {:?}", self.file))?;
+        let _ = self.file.as_mut().map(|f| f.flush());
 
         Ok(vec![])
     }
@@ -106,6 +100,3 @@ impl CheatAlgorithm<'_> for WriteToFile {
         Some(&mut self.params)
     }
 }
-
-
-

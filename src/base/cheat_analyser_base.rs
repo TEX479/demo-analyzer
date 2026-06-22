@@ -31,8 +31,8 @@ use tf_demo_parser::demo::vector::{Vector, VectorXY};
 use tf_demo_parser::{MessageType, ParserState, ReadResult, Stream};
 use web_time::Instant;
 
-use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::dev_print;
+use crate::lib::algorithm::{CheatAlgorithm, Detection};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum PlayerState {
@@ -155,41 +155,37 @@ impl Building {
 
     pub fn entity_id(&self) -> EntityId {
         match self {
-            Building::Sentry(Sentry { entity, .. })
-            | Building::Dispenser(Dispenser { entity, .. })
-            | Building::Teleporter(Teleporter { entity, .. }) => *entity,
+            Building::Sentry(Sentry { entity, .. }) | Building::Dispenser(Dispenser { entity, .. }) | Building::Teleporter(Teleporter { entity, .. }) => {
+                *entity
+            }
         }
     }
 
     pub fn level(&self) -> u8 {
         match self {
-            Building::Sentry(Sentry { level, .. })
-            | Building::Dispenser(Dispenser { level, .. })
-            | Building::Teleporter(Teleporter { level, .. }) => *level,
+            Building::Sentry(Sentry { level, .. }) | Building::Dispenser(Dispenser { level, .. }) | Building::Teleporter(Teleporter { level, .. }) => *level,
         }
     }
 
     pub fn position(&self) -> Vector {
         match self {
-            Building::Sentry(Sentry { position, .. })
-            | Building::Dispenser(Dispenser { position, .. })
-            | Building::Teleporter(Teleporter { position, .. }) => *position,
+            Building::Sentry(Sentry { position, .. }) | Building::Dispenser(Dispenser { position, .. }) | Building::Teleporter(Teleporter { position, .. }) => {
+                *position
+            }
         }
     }
 
     pub fn builder(&self) -> UserId {
         match self {
-            Building::Sentry(Sentry { builder, .. })
-            | Building::Dispenser(Dispenser { builder, .. })
-            | Building::Teleporter(Teleporter { builder, .. }) => *builder,
+            Building::Sentry(Sentry { builder, .. }) | Building::Dispenser(Dispenser { builder, .. }) | Building::Teleporter(Teleporter { builder, .. }) => {
+                *builder
+            }
         }
     }
 
     pub fn angle(&self) -> f32 {
         match self {
-            Building::Sentry(Sentry { angle, .. })
-            | Building::Dispenser(Dispenser { angle, .. })
-            | Building::Teleporter(Teleporter { angle, .. }) => *angle,
+            Building::Sentry(Sentry { angle, .. }) | Building::Dispenser(Dispenser { angle, .. }) | Building::Teleporter(Teleporter { angle, .. }) => *angle,
         }
     }
 
@@ -203,25 +199,23 @@ impl Building {
 
     pub fn health(&self) -> u16 {
         match self {
-            Building::Sentry(Sentry { health, .. })
-            | Building::Dispenser(Dispenser { health, .. })
-            | Building::Teleporter(Teleporter { health, .. }) => *health,
+            Building::Sentry(Sentry { health, .. }) | Building::Dispenser(Dispenser { health, .. }) | Building::Teleporter(Teleporter { health, .. }) => {
+                *health
+            }
         }
     }
 
     pub fn sapped(&self) -> bool {
         match self {
-            Building::Sentry(Sentry { sapped, .. })
-            | Building::Dispenser(Dispenser { sapped, .. })
-            | Building::Teleporter(Teleporter { sapped, .. }) => *sapped,
+            Building::Sentry(Sentry { sapped, .. }) | Building::Dispenser(Dispenser { sapped, .. }) | Building::Teleporter(Teleporter { sapped, .. }) => {
+                *sapped
+            }
         }
     }
 
     pub fn team(&self) -> Team {
         match self {
-            Building::Sentry(Sentry { team, .. })
-            | Building::Dispenser(Dispenser { team, .. })
-            | Building::Teleporter(Teleporter { team, .. }) => *team,
+            Building::Sentry(Sentry { team, .. }) | Building::Dispenser(Dispenser { team, .. }) | Building::Teleporter(Teleporter { team, .. }) => *team,
         }
     }
 
@@ -317,14 +311,8 @@ impl CheatAnalyserState {
         self.userid_to_id64.insert(userid, id64);
     }
 
-    pub fn get_or_create_building(
-        &mut self,
-        entity_id: EntityId,
-        class: BuildingClass,
-    ) -> &mut Building {
-        self.buildings
-            .entry(entity_id)
-            .or_insert_with(|| Building::new(entity_id, class))
+    pub fn get_or_create_building(&mut self, entity_id: EntityId, class: BuildingClass) -> &mut Building {
+        self.buildings.entry(entity_id).or_insert_with(|| Building::new(entity_id, class))
     }
 
     pub fn remove_building(&mut self, entity_id: EntityId) {
@@ -334,11 +322,7 @@ impl CheatAnalyserState {
 
 // ParserState requires a non-self impl of does_handle so I had to create this.
 lazy_static! {
-    static ref HANDLED_MESSAGE_TYPES: Mutex<Vec<MessageType>> = Mutex::new(vec![
-        MessageType::PacketEntities,
-        MessageType::GameEvent,
-        MessageType::NetTick
-    ]);
+    static ref HANDLED_MESSAGE_TYPES: Mutex<Vec<MessageType>> = Mutex::new(vec![MessageType::PacketEntities, MessageType::GameEvent, MessageType::NetTick]);
 }
 
 pub struct CheatAnalyser<'a> {
@@ -371,7 +355,7 @@ impl MessageHandler for CheatAnalyser<'_> {
     type Output = CheatAnalyserState;
 
     fn does_handle(message_type: MessageType) -> bool {
-        let message_types = HANDLED_MESSAGE_TYPES.lock().unwrap();
+        let message_types = HANDLED_MESSAGE_TYPES.lock().expect("mutex should be lockable");
         message_types.is_empty() || message_types.contains(&message_type)
     }
 
@@ -390,9 +374,8 @@ impl MessageHandler for CheatAnalyser<'_> {
             Message::NetTick(_) => {
                 self.check_progress();
                 for algorithm in &mut self.algorithms {
-                    match algorithm.on_tick(&self.state, parser_state) {
-                        Ok(detections) => self.detections.extend(detections),
-                        Err(_) => {}
+                    if let Ok(detections) = algorithm.on_tick(&self.state, parser_state) {
+                        self.detections.extend(detections)
                     }
                 }
             }
@@ -426,15 +409,11 @@ impl MessageHandler for CheatAnalyser<'_> {
                     self.state.remove_building((*index as u32).into());
                 }
                 GameEvent::PlayerConnectClient(event) => {
-                    self.state.set_entid_to_userid(
-                        EntityId::from(event.index as u32),
-                        UserId::from(event.user_id),
-                    );
+                    self.state.set_entid_to_userid(EntityId::from(event.index as u32), UserId::from(event.user_id));
                     if event.network_id != "BOT".into() {
                         let steamid = SteamID::from_steam3(event.network_id.to_string().as_str());
                         let steamid64 = u64::from(steamid.unwrap_or(0.into()));
-                        self.state
-                            .set_userid_to_id64(event.user_id.into(), steamid64);
+                        self.state.set_userid_to_id64(event.user_id.into(), steamid64);
                     }
                 }
                 _ => {}
@@ -445,20 +424,13 @@ impl MessageHandler for CheatAnalyser<'_> {
             if !algorithm.does_handle(message.get_message_type()) {
                 continue;
             }
-            match algorithm.on_message(message, &self.state, &parser_state, _tick) {
-                Ok(detections) => self.detections.extend(detections),
-                Err(_) => {}
+            if let Ok(detections) = algorithm.on_message(message, &self.state, parser_state, _tick) {
+                self.detections.extend(detections)
             }
         }
     }
 
-    fn handle_string_entry(
-        &mut self,
-        table: &str,
-        index: usize,
-        entry: &StringTableEntry,
-        _parser_state: &ParserState,
-    ) {
+    fn handle_string_entry(&mut self, table: &str, index: usize, entry: &StringTableEntry, _parser_state: &ParserState) {
         if table == "userinfo" {
             let _ = self.parse_user_info(
                 index,
@@ -468,25 +440,11 @@ impl MessageHandler for CheatAnalyser<'_> {
         }
     }
 
-    fn handle_data_tables(
-        &mut self,
-        _parse_tables: &[ParseSendTable],
-        server_classes: &[ServerClass],
-        _parser_state: &ParserState,
-    ) {
-        self.class_names = server_classes
-            .iter()
-            .map(|class| &class.name)
-            .cloned()
-            .collect();
+    fn handle_data_tables(&mut self, _parse_tables: &[ParseSendTable], server_classes: &[ServerClass], _parser_state: &ParserState) {
+        self.class_names = server_classes.iter().map(|class| &class.name).cloned().collect();
     }
 
-    fn handle_packet_meta(
-        &mut self,
-        tick: DemoTick,
-        _meta: &MessagePacketMeta,
-        _parser_state: &ParserState,
-    ) {
+    fn handle_packet_meta(&mut self, tick: DemoTick, _meta: &MessagePacketMeta, _parser_state: &ParserState) {
         self.state.tick = tick;
         self.tick = tick;
     }
@@ -504,7 +462,7 @@ impl BorrowMessageHandler for CheatAnalyser<'_> {
 
 impl<'a> CheatAnalyser<'a> {
     pub fn new(algorithms: Vec<Box<dyn CheatAlgorithm<'a> + 'a + Send>>) -> Self {
-        let mut message_types = HANDLED_MESSAGE_TYPES.lock().unwrap();
+        let mut message_types = HANDLED_MESSAGE_TYPES.lock().expect("the HANDLED_MESSAGE_TYPES mutex must be lockable");
         // Figure out what message types we're going to be using.
         let mut specified_message_types: Vec<MessageType> = vec![];
         for algorithm in &algorithms {
@@ -558,10 +516,7 @@ impl<'a> CheatAnalyser<'a> {
     }
 
     pub fn print_metadata(&self) {
-        if self.header.is_none() {
-            return;
-        }
-        let header = self.header.as_ref().unwrap();
+        let Some(header) = self.header.as_ref() else { return };
         let ticks = self.get_tick_count_u32();
 
         dev_print!("Map: {}", header.map);
@@ -569,14 +524,7 @@ impl<'a> CheatAnalyser<'a> {
         let minutes = ((header.duration % 3600.0) / 60.0).floor();
         let seconds = (header.duration % 60.0).floor();
         let milliseconds = ((header.duration % 1.0) * 100.0).floor();
-        dev_print!(
-            "Duration: {:02}:{:02}:{:02}.{:03} ({} ticks)",
-            hours,
-            minutes,
-            seconds,
-            milliseconds,
-            ticks
-        );
+        dev_print!("Duration: {:02}:{:02}:{:02}.{:03} ({} ticks)", hours, minutes, seconds, milliseconds, ticks);
         dev_print!("User: {}", header.nick);
         dev_print!("Server: {}", header.server);
     }
@@ -590,9 +538,9 @@ impl<'a> CheatAnalyser<'a> {
             "detections": self.detections
         });
         let json = if pretty {
-            serde_json::to_string_pretty(&analysis).unwrap()
+            serde_json::to_string_pretty(&analysis).unwrap_or(format!("could not convert CheatAnalyser to pretty json. CheatAnalyser:\n{:#?}", analysis))
         } else {
-            serde_json::to_string(&analysis).unwrap()
+            serde_json::to_string(&analysis).unwrap_or(format!("could not convert CheatAnalyser to json. CheatAnalyser:\n{:?}", analysis))
         };
         println!("{}", json);
     }
@@ -602,11 +550,7 @@ impl<'a> CheatAnalyser<'a> {
         for detection in &self.detections {
             let algorithm = detection.algorithm.clone();
             let steamid = detection.player;
-            *algorithm_counts
-                .entry(algorithm)
-                .or_insert(HashMap::new())
-                .entry(steamid)
-                .or_insert(0) += 1;
+            *algorithm_counts.entry(algorithm).or_default().entry(steamid).or_insert(0) += 1;
         }
 
         dev_print!("Total detections: {}", self.detections.len());
@@ -622,7 +566,7 @@ impl<'a> CheatAnalyser<'a> {
                 steamid_counts.values().sum::<usize>()
             );
             let mut steamid_counts_vec: Vec<_> = steamid_counts.into_iter().collect();
-            steamid_counts_vec.sort_by(|a, b| b.1.cmp(&a.1));
+            steamid_counts_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
             for (steamid, count) in steamid_counts_vec {
                 dev_print!("    {}: {}", steamid, count);
             }
@@ -643,31 +587,24 @@ impl<'a> CheatAnalyser<'a> {
 
         self.last_progress_update_time = Instant::now();
         self.progress.push(tick);
-        while self.progress.len() > TPS_ROLLING_AVERAGE_WINDOW.try_into().unwrap() {
+        while self.progress.len() > TPS_ROLLING_AVERAGE_WINDOW as usize {
             self.progress.remove(0);
         }
 
         let tps = if self.progress.len() >= 2 {
-            let tps = (self.progress.last().unwrap() - self.progress.first().unwrap()) as f64
+            let tps = (self.progress.last().expect("CheatAnalyser has to have a last element in `progress` field")
+                - self.progress.first().expect("CheatAnalyser has to have a first element in `progress` field")) as f64
                 / (self.progress.len() as f64 - 1.0);
             tps * PROGRESS_UPDATE_INTERVAL_MS as f64 / 1000.0
         } else {
             tick.into()
         };
 
-        dev_print!(
-            "Processing tick {} ({} remaining, {:.0} tps)",
-            tick,
-            self.get_tick_count_u32() - tick,
-            tps
-        );
+        dev_print!("Processing tick {} ({} remaining, {:.0} tps)", tick, self.get_tick_count_u32() - tick, tps);
     }
 
     pub fn get_tick_count_u32(&self) -> u32 {
-        if self.header.is_none() {
-            return self.tick.into();
-        }
-        let header = self.header.as_ref().unwrap();
+        let Some(header) = self.header.as_ref() else { return self.tick.into() };
         if self.tick > header.ticks {
             self.tick.into()
         } else {
@@ -698,37 +635,16 @@ impl<'a> CheatAnalyser<'a> {
                 if let Ok(player_id) = u32::from_str(prop_name.as_str()) {
                     let entity_id = EntityId::from(player_id);
                     let mut mappings: Vec<(EntityId, UserId)> = vec![];
-                    if let Some(player) = self
-                        .state
-                        .players
-                        .iter_mut()
-                        .find(|player| player.entity == entity_id)
-                    {
-                        match &player.info {
-                            Some(info) => {
-                                mappings.push((entity_id, info.user_id));
-                            }
-                            None => {}
+                    if let Some(player) = self.state.players.iter_mut().find(|player| player.entity == entity_id) {
+                        if let Some(info) = &player.info {
+                            mappings.push((entity_id, info.user_id));
                         };
                         match table_name.as_str() {
-                            "m_iTeam" => {
-                                player.team =
-                                    Team::new(i64::try_from(&prop.value).unwrap_or_default())
-                            }
-                            "m_iMaxHealth" => {
-                                player.max_health =
-                                    i64::try_from(&prop.value).unwrap_or_default() as u16
-                            }
-                            "m_iPlayerClass" => {
-                                player.class =
-                                    Class::new(i64::try_from(&prop.value).unwrap_or_default())
-                            }
-                            "m_iChargeLevel" => {
-                                player.charge = i64::try_from(&prop.value).unwrap_or_default() as u8
-                            }
-                            "m_iPing" => {
-                                player.ping = i64::try_from(&prop.value).unwrap_or_default() as u16
-                            }
+                            "m_iTeam" => player.team = Team::new(i64::try_from(&prop.value).unwrap_or_default()),
+                            "m_iMaxHealth" => player.max_health = i64::try_from(&prop.value).unwrap_or_default() as u16,
+                            "m_iPlayerClass" => player.class = Class::new(i64::try_from(&prop.value).unwrap_or_default()),
+                            "m_iChargeLevel" => player.charge = i64::try_from(&prop.value).unwrap_or_default() as u8,
+                            "m_iPing" => player.ping = i64::try_from(&prop.value).unwrap_or_default() as u16,
                             _ => {}
                         }
                     }
@@ -743,63 +659,37 @@ impl<'a> CheatAnalyser<'a> {
     pub fn handle_player_entity(&mut self, entity: &PacketEntity, parser_state: &ParserState) {
         let player = self.state.get_or_create_player(entity.entity_index);
 
-        const HEALTH_PROP: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BasePlayer", "m_iHealth");
-        const MAX_HEALTH_PROP: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BasePlayer", "m_iMaxHealth");
-        const LIFE_STATE_PROP: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BasePlayer", "m_lifeState");
+        const HEALTH_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_BasePlayer", "m_iHealth");
+        const MAX_HEALTH_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_BasePlayer", "m_iMaxHealth");
+        const LIFE_STATE_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_BasePlayer", "m_lifeState");
 
-        const LOCAL_ORIGIN: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_vecOrigin");
-        const NON_LOCAL_ORIGIN: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_vecOrigin");
-        const LOCAL_ORIGIN_Z: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_vecOrigin[2]");
-        const NON_LOCAL_ORIGIN_Z: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_vecOrigin[2]");
-        const LOCAL_EYE_ANGLES: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_angEyeAngles[1]");
-        const NON_LOCAL_EYE_ANGLES: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[1]");
-        const LOCAL_PITCH_ANGLES: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_angEyeAngles[0]");
-        const NON_LOCAL_PITCH_ANGLES: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[0]");
+        const LOCAL_ORIGIN: SendPropIdentifier = SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_vecOrigin");
+        const NON_LOCAL_ORIGIN: SendPropIdentifier = SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_vecOrigin");
+        const LOCAL_ORIGIN_Z: SendPropIdentifier = SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_vecOrigin[2]");
+        const NON_LOCAL_ORIGIN_Z: SendPropIdentifier = SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_vecOrigin[2]");
+        const LOCAL_EYE_ANGLES: SendPropIdentifier = SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_angEyeAngles[1]");
+        const NON_LOCAL_EYE_ANGLES: SendPropIdentifier = SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[1]");
+        const LOCAL_PITCH_ANGLES: SendPropIdentifier = SendPropIdentifier::new("DT_TFLocalPlayerExclusive", "m_angEyeAngles[0]");
+        const NON_LOCAL_PITCH_ANGLES: SendPropIdentifier = SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[0]");
 
-        const SIMTIME_PROP: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BaseEntity", "m_flSimulationTime");
+        const SIMTIME_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_BaseEntity", "m_flSimulationTime");
 
         player.in_pvs = entity.in_pvs;
 
         for prop in entity.props(parser_state) {
             match prop.identifier {
-                HEALTH_PROP => {
-                    player.health = i64::try_from(&prop.value).unwrap_or_default() as u16
-                }
-                MAX_HEALTH_PROP => {
-                    player.max_health = i64::try_from(&prop.value).unwrap_or_default() as u16
-                }
-                LIFE_STATE_PROP => {
-                    player.state = PlayerState::new(i64::try_from(&prop.value).unwrap_or_default())
-                }
+                HEALTH_PROP => player.health = i64::try_from(&prop.value).unwrap_or_default() as u16,
+                MAX_HEALTH_PROP => player.max_health = i64::try_from(&prop.value).unwrap_or_default() as u16,
+                LIFE_STATE_PROP => player.state = PlayerState::new(i64::try_from(&prop.value).unwrap_or_default()),
                 LOCAL_ORIGIN | NON_LOCAL_ORIGIN => {
                     let pos_xy = VectorXY::try_from(&prop.value).unwrap_or_default();
                     player.position.x = pos_xy.x;
                     player.position.y = pos_xy.y;
                 }
-                LOCAL_ORIGIN_Z | NON_LOCAL_ORIGIN_Z => {
-                    player.position.z = f32::try_from(&prop.value).unwrap_or_default()
-                }
-                LOCAL_EYE_ANGLES | NON_LOCAL_EYE_ANGLES => {
-                    player.view_angle = f32::try_from(&prop.value).unwrap_or_default()
-                }
-                LOCAL_PITCH_ANGLES | NON_LOCAL_PITCH_ANGLES => {
-                    player.pitch_angle = f32::try_from(&prop.value).unwrap_or_default()
-                }
-                SIMTIME_PROP => {
-                    player.simtime = i64::try_from(&prop.value).unwrap_or_default() as u16
-                }
+                LOCAL_ORIGIN_Z | NON_LOCAL_ORIGIN_Z => player.position.z = f32::try_from(&prop.value).unwrap_or_default(),
+                LOCAL_EYE_ANGLES | NON_LOCAL_EYE_ANGLES => player.view_angle = f32::try_from(&prop.value).unwrap_or_default(),
+                LOCAL_PITCH_ANGLES | NON_LOCAL_PITCH_ANGLES => player.pitch_angle = f32::try_from(&prop.value).unwrap_or_default(),
+                SIMTIME_PROP => player.simtime = i64::try_from(&prop.value).unwrap_or_default() as u16,
                 _ => {}
             }
         }
@@ -819,26 +709,17 @@ impl<'a> CheatAnalyser<'a> {
             entity.get_prop_by_name("DT_WORLD", "m_WorldMins", parser_state),
             entity.get_prop_by_name("DT_WORLD", "m_WorldMaxs", parser_state),
         ) {
-            self.state.world = Some(World {
-                boundary_min,
-                boundary_max,
-            })
+            self.state.world = Some(World { boundary_min, boundary_max })
         }
     }
 
     pub fn handle_sentry_entity(&mut self, entity: &PacketEntity, parser_state: &ParserState) {
-        const ANGLE: SendPropIdentifier =
-            SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[1]");
-        const MINI: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BaseObject", "m_bMiniBuilding");
-        const CONTROLLED: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectSentrygun", "m_bPlayerControlled");
-        const TARGET: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectSentrygun", "m_hAutoAimTarget");
-        const SHELLS: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectSentrygun", "m_iAmmoShells");
-        const ROCKETS: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectSentrygun", "m_iAmmoRockets");
+        const ANGLE: SendPropIdentifier = SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[1]");
+        const MINI: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_bMiniBuilding");
+        const CONTROLLED: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectSentrygun", "m_bPlayerControlled");
+        const TARGET: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectSentrygun", "m_hAutoAimTarget");
+        const SHELLS: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectSentrygun", "m_iAmmoShells");
+        const ROCKETS: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectSentrygun", "m_iAmmoRockets");
 
         if entity.update_type == UpdateType::Delete {
             self.state.remove_building(entity.entity_index);
@@ -847,27 +728,17 @@ impl<'a> CheatAnalyser<'a> {
 
         self.handle_building(entity, parser_state, BuildingClass::Sentry);
 
-        let building = self
-            .state
-            .get_or_create_building(entity.entity_index, BuildingClass::Sentry);
+        let building = self.state.get_or_create_building(entity.entity_index, BuildingClass::Sentry);
 
         if let Building::Sentry(sentry) = building {
             for prop in entity.props(parser_state) {
                 match prop.identifier {
                     ANGLE => sentry.angle = f32::try_from(&prop.value).unwrap_or_default(),
                     MINI => sentry.is_mini = i64::try_from(&prop.value).unwrap_or_default() > 0,
-                    CONTROLLED => {
-                        sentry.player_controlled =
-                            i64::try_from(&prop.value).unwrap_or_default() > 0
-                    }
-                    TARGET => {
-                        sentry.auto_aim_target =
-                            UserId::from(i64::try_from(&prop.value).unwrap_or_default() as u16)
-                    }
+                    CONTROLLED => sentry.player_controlled = i64::try_from(&prop.value).unwrap_or_default() > 0,
+                    TARGET => sentry.auto_aim_target = UserId::from(i64::try_from(&prop.value).unwrap_or_default() as u16),
                     SHELLS => sentry.shells = i64::try_from(&prop.value).unwrap_or_default() as u16,
-                    ROCKETS => {
-                        sentry.rockets = i64::try_from(&prop.value).unwrap_or_default() as u16
-                    }
+                    ROCKETS => sentry.rockets = i64::try_from(&prop.value).unwrap_or_default() as u16,
                     _ => {}
                 }
             }
@@ -875,18 +746,12 @@ impl<'a> CheatAnalyser<'a> {
     }
 
     pub fn handle_teleporter_entity(&mut self, entity: &PacketEntity, parser_state: &ParserState) {
-        const RECHARGE_TIME: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectTeleporter", "m_flRechargeTime");
-        const RECHARGE_DURATION: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectTeleporter", "m_flCurrentRechargeDuration");
-        const TIMES_USED: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectTeleporter", "m_iTimesUsed");
-        const OTHER_END: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectTeleporter", "m_bMatchBuilding");
-        const YAW_TO_EXIT: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectTeleporter", "m_flYawToExit");
-        const IS_ENTRANCE: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BaseObject", "m_iObjectMode");
+        const RECHARGE_TIME: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectTeleporter", "m_flRechargeTime");
+        const RECHARGE_DURATION: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectTeleporter", "m_flCurrentRechargeDuration");
+        const TIMES_USED: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectTeleporter", "m_iTimesUsed");
+        const OTHER_END: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectTeleporter", "m_bMatchBuilding");
+        const YAW_TO_EXIT: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectTeleporter", "m_flYawToExit");
+        const IS_ENTRANCE: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_iObjectMode");
 
         if entity.update_type == UpdateType::Delete {
             self.state.remove_building(entity.entity_index);
@@ -895,34 +760,17 @@ impl<'a> CheatAnalyser<'a> {
 
         self.handle_building(entity, parser_state, BuildingClass::Teleporter);
 
-        let building = self
-            .state
-            .get_or_create_building(entity.entity_index, BuildingClass::Teleporter);
+        let building = self.state.get_or_create_building(entity.entity_index, BuildingClass::Teleporter);
 
         if let Building::Teleporter(teleporter) = building {
             for prop in entity.props(parser_state) {
                 match prop.identifier {
-                    RECHARGE_TIME => {
-                        teleporter.recharge_time = f32::try_from(&prop.value).unwrap_or_default()
-                    }
-                    RECHARGE_DURATION => {
-                        teleporter.recharge_duration =
-                            f32::try_from(&prop.value).unwrap_or_default()
-                    }
-                    TIMES_USED => {
-                        teleporter.times_used =
-                            i64::try_from(&prop.value).unwrap_or_default() as u16
-                    }
-                    OTHER_END => {
-                        teleporter.other_end =
-                            EntityId::from(i64::try_from(&prop.value).unwrap_or_default() as u32)
-                    }
-                    YAW_TO_EXIT => {
-                        teleporter.yaw_to_exit = f32::try_from(&prop.value).unwrap_or_default()
-                    }
-                    IS_ENTRANCE => {
-                        teleporter.is_entrance = i64::try_from(&prop.value).unwrap_or_default() == 0
-                    }
+                    RECHARGE_TIME => teleporter.recharge_time = f32::try_from(&prop.value).unwrap_or_default(),
+                    RECHARGE_DURATION => teleporter.recharge_duration = f32::try_from(&prop.value).unwrap_or_default(),
+                    TIMES_USED => teleporter.times_used = i64::try_from(&prop.value).unwrap_or_default() as u16,
+                    OTHER_END => teleporter.other_end = EntityId::from(i64::try_from(&prop.value).unwrap_or_default() as u32),
+                    YAW_TO_EXIT => teleporter.yaw_to_exit = f32::try_from(&prop.value).unwrap_or_default(),
+                    IS_ENTRANCE => teleporter.is_entrance = i64::try_from(&prop.value).unwrap_or_default() == 0,
                     _ => {}
                 }
             }
@@ -930,10 +778,8 @@ impl<'a> CheatAnalyser<'a> {
     }
 
     pub fn handle_dispenser_entity(&mut self, entity: &PacketEntity, parser_state: &ParserState) {
-        const AMMO: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectDispenser", "m_iAmmoMetal");
-        const HEALING: SendPropIdentifier =
-            SendPropIdentifier::new("DT_ObjectDispenser", "healing_array");
+        const AMMO: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectDispenser", "m_iAmmoMetal");
+        const HEALING: SendPropIdentifier = SendPropIdentifier::new("DT_ObjectDispenser", "healing_array");
 
         if entity.update_type == UpdateType::Delete {
             self.state.remove_building(entity.entity_index);
@@ -942,9 +788,7 @@ impl<'a> CheatAnalyser<'a> {
 
         self.handle_building(entity, parser_state, BuildingClass::Dispenser);
 
-        let building = self
-            .state
-            .get_or_create_building(entity.entity_index, BuildingClass::Dispenser);
+        let building = self.state.get_or_create_building(entity.entity_index, BuildingClass::Dispenser);
 
         if let Building::Dispenser(dispenser) = building {
             for prop in entity.props(parser_state) {
@@ -956,10 +800,7 @@ impl<'a> CheatAnalyser<'a> {
                             _ => Default::default(),
                         };
 
-                        dispenser.healing = values
-                            .iter()
-                            .map(|val| UserId::from(i64::try_from(val).unwrap_or_default() as u16))
-                            .collect()
+                        dispenser.healing = values.iter().map(|val| UserId::from(i64::try_from(val).unwrap_or_default() as u16)).collect()
                     }
                     _ => {}
                 }
@@ -967,28 +808,17 @@ impl<'a> CheatAnalyser<'a> {
         }
     }
 
-    fn handle_building(
-        &mut self,
-        entity: &PacketEntity,
-        parser_state: &ParserState,
-        class: BuildingClass,
-    ) {
-        let building = self
-            .state
-            .get_or_create_building(entity.entity_index, class);
+    fn handle_building(&mut self, entity: &PacketEntity, parser_state: &ParserState, class: BuildingClass) {
+        let building = self.state.get_or_create_building(entity.entity_index, class);
 
-        const LOCAL_ORIGIN: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BaseEntity", "m_vecOrigin");
+        const LOCAL_ORIGIN: SendPropIdentifier = SendPropIdentifier::new("DT_BaseEntity", "m_vecOrigin");
         const TEAM: SendPropIdentifier = SendPropIdentifier::new("DT_BaseEntity", "m_iTeamNum");
         const ANGLE: SendPropIdentifier = SendPropIdentifier::new("DT_BaseEntity", "m_angRotation");
         const SAPPED: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_bHasSapper");
-        const BUILDING: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BaseObject", "m_bBuilding");
-        const LEVEL: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BaseObject", "m_iUpgradeLevel");
+        const BUILDING: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_bBuilding");
+        const LEVEL: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_iUpgradeLevel");
         const BUILDER: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_hBuilder");
-        const MAX_HEALTH: SendPropIdentifier =
-            SendPropIdentifier::new("DT_BaseObject", "m_iMaxHealth");
+        const MAX_HEALTH: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_iMaxHealth");
         const HEALTH: SendPropIdentifier = SendPropIdentifier::new("DT_BaseObject", "m_iHealth");
 
         match building {
@@ -1030,21 +860,14 @@ impl<'a> CheatAnalyser<'a> {
             }) => {
                 for prop in entity.props(parser_state) {
                     match prop.identifier {
-                        LOCAL_ORIGIN => {
-                            *position = Vector::try_from(&prop.value).unwrap_or_default()
-                        }
+                        LOCAL_ORIGIN => *position = Vector::try_from(&prop.value).unwrap_or_default(),
                         TEAM => *team = Team::new(i64::try_from(&prop.value).unwrap_or_default()),
                         ANGLE => *angle = f32::try_from(&prop.value).unwrap_or_default(),
                         SAPPED => *sapped = i64::try_from(&prop.value).unwrap_or_default() > 0,
                         BUILDING => *building = i64::try_from(&prop.value).unwrap_or_default() > 0,
                         LEVEL => *level = i64::try_from(&prop.value).unwrap_or_default() as u8,
-                        BUILDER => {
-                            *builder =
-                                UserId::from(i64::try_from(&prop.value).unwrap_or_default() as u16)
-                        }
-                        MAX_HEALTH => {
-                            *max_health = i64::try_from(&prop.value).unwrap_or_default() as u16
-                        }
+                        BUILDER => *builder = UserId::from(i64::try_from(&prop.value).unwrap_or_default() as u16),
+                        MAX_HEALTH => *max_health = i64::try_from(&prop.value).unwrap_or_default() as u16,
                         HEALTH => *health = i64::try_from(&prop.value).unwrap_or_default() as u16,
                         _ => {}
                     }
@@ -1053,23 +876,12 @@ impl<'a> CheatAnalyser<'a> {
         }
     }
 
-    fn parse_user_info(
-        &mut self,
-        index: usize,
-        text: Option<&str>,
-        data: Option<Stream>,
-    ) -> ReadResult<()> {
-        if let Some(user_info) =
-            tf_demo_parser::demo::data::UserInfo::parse_from_string_table(index as u16, text, data)?
-        {
+    fn parse_user_info(&mut self, index: usize, text: Option<&str>, data: Option<Stream>) -> ReadResult<()> {
+        if let Some(user_info) = tf_demo_parser::demo::data::UserInfo::parse_from_string_table(index as u16, text, data)? {
             let ent_id = user_info.entity_id;
-            self.state
-                .set_entid_to_userid(ent_id, user_info.player_info.user_id.clone());
-            match SteamID::from_steam3(&user_info.player_info.steam_id) {
-                Ok(steam_id) => self
-                    .state
-                    .set_userid_to_id64(user_info.player_info.user_id.clone(), steam_id.into()),
-                Err(_) => {}
+            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id);
+            if let Ok(steam_id) = SteamID::from_steam3(&user_info.player_info.steam_id) {
+                self.state.set_userid_to_id64(user_info.player_info.user_id, steam_id.into())
             }
             self.state.get_or_create_player(ent_id).info = Some(user_info.into());
         }

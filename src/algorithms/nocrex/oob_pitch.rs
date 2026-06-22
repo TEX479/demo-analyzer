@@ -1,23 +1,21 @@
 // Written by Nocrex
 
-use std::{collections::{HashMap, HashSet}};
+use std::collections::{HashMap, HashSet};
 
-use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, PlayerState}
-};
+use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
-use tf_demo_parser::{ParserState, demo::message::Message};
+use tf_demo_parser::{demo::message::Message, ParserState};
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
 
 pub struct OOBPitch {
     last_detections: HashSet<String>,
     server_name: String,
-    
+
     params: Parameters,
 }
 
@@ -35,6 +33,12 @@ impl OOBPitch {
     }
 }
 
+impl Default for OOBPitch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> CheatAlgorithm<'a> for OOBPitch {
     fn default(&self) -> bool {
         true
@@ -48,35 +52,36 @@ impl<'a> CheatAlgorithm<'a> for OOBPitch {
         Ok(vec![tf_demo_parser::MessageType::ServerInfo, tf_demo_parser::MessageType::NetTick])
     }
 
-    fn on_message(&mut self,
+    fn on_message(
+        &mut self,
         message: &Message,
         state: &CheatAnalyserState,
         _: &ParserState,
-        _: tf_demo_parser::demo::data::DemoTick) -> Result<Vec<Detection>, Error> {
+        _: tf_demo_parser::demo::data::DemoTick,
+    ) -> Result<Vec<Detection>, Error> {
         let mut submitted_detections = Vec::new();
 
         if let Message::ServerInfo(event) = message {
-            if self.server_name == "" {
+            if self.server_name.is_empty() {
                 self.server_name = event.server_name.trim().to_string();
             }
         }
-        
+
         if let Message::NetTick(_) = message {
             let ticknum = u32::from(state.tick);
             let players = &state.players;
 
             let mut detections = HashSet::new();
 
-            let min_pitch: f32 = get_parameter_value(&self.params, "min_pitch");
-            let max_pitch: f32 = get_parameter_value(&self.params, "max_pitch");
+            let min_pitch: f32 = get_parameter_value(&self.params, "min_pitch")?;
+            let max_pitch: f32 = get_parameter_value(&self.params, "max_pitch")?;
 
             let is_valve_server = self.server_name.starts_with("Valve Matchmaking Server");
 
-            for player in players.iter().filter(|p| {
-                p.in_pvs
-                    && p.state == PlayerState::Alive
-                    && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-            }) {
+            for player in players
+                .iter()
+                .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
+            {
                 let info = match &player.info {
                     Some(info) => info,
                     None => continue,
@@ -86,11 +91,11 @@ impl<'a> CheatAlgorithm<'a> for OOBPitch {
 
                 if !(min_pitch..=max_pitch).contains(&player.pitch_angle) {
                     detections.insert(steam_id.clone());
-                    if !self.last_detections.contains(steam_id){
+                    if !self.last_detections.contains(steam_id) {
                         submitted_detections.push(Detection {
                             tick: ticknum,
                             algorithm: self.algorithm_name().to_string(),
-                            player: u64::from(SteamID::from_steam3(&steam_id).unwrap()),
+                            player: u64::from(SteamID::from_steam3(steam_id).context(format!("invalid steam_id3: {:?}", steam_id))?),
                             data: json!({
                                 "pitch": player.pitch_angle,
                                 "valve_server": is_valve_server
@@ -101,13 +106,11 @@ impl<'a> CheatAlgorithm<'a> for OOBPitch {
             }
 
             self.last_detections = detections;
-
         }
 
         Ok(submitted_detections)
-
     }
-    
+
     fn params(&mut self) -> Option<&mut Parameters> {
         Some(&mut self.params)
     }

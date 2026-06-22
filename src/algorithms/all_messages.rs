@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
 
-use anyhow::Error;
+use anyhow::{Context, Error, Result};
 use tf_demo_parser::demo::data::DemoTick;
 use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::{MessageType, ParserState};
@@ -22,33 +22,29 @@ pub struct AllMessages {
 }
 
 impl AllMessages {
-    fn write_messages_to_file(&mut self) {
-        let out = self.msg_history.join("\n"); 
-        write!(self.file.as_mut().unwrap(), "{}\n", out).unwrap();
+    fn write_messages_to_file(&mut self) -> Result<()> {
+        let out = self.msg_history.join("\n");
+        writeln!(self.file.as_mut().context("`file` field is None")?, "{}", out).context(format!("could not write to file {:?}", self.file))
     }
 
-    pub fn init_file(&mut self, file_path: &str) {
-        self.file = Some(match fs::File::create(file_path) {
-            Ok(file) => file,
-            Err(err) => {
-                if err.kind() != std::io::ErrorKind::AlreadyExists {
-                    panic!("Error creating file: {}", err);
-                }
-                fs::remove_file(file_path).unwrap();
-                fs::File::create(file_path).unwrap()
-            }
-        });
+    pub fn init_file(&mut self, file_path: &str) -> Result<()> {
+        self.file = Some(fs::File::create(file_path).context(format!("could not create file {}", file_path))?);
+        Ok(())
     }
 
-    pub fn new () -> AllMessages {
+    pub fn new() -> AllMessages {
         AllMessages {
             msg_history: Vec::new(),
             file: None,
             first_write: true,
-            params: HashMap::from([
-                ("write_batch_size".to_string(), Parameter::Int(2048))
-            ])
+            params: HashMap::from([("write_batch_size".to_string(), Parameter::Int(2048))]),
         }
+    }
+}
+
+impl Default for AllMessages {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -61,34 +57,37 @@ impl CheatAlgorithm<'_> for AllMessages {
         "all_messages"
     }
 
-    fn init(&mut self) -> Result<(), Error> {
-        dev_print!("Initializing AllMessages algorithm with write_batch_size = {}", get_parameter_value::<i32>(&self.params, "write_batch_size"));
-        self.init_file("./output/all_messages.txt");
-        Ok(())
+    fn init(&mut self) -> Result<()> {
+        dev_print!(
+            "Initializing AllMessages algorithm with write_batch_size = {}",
+            get_parameter_value::<i32>(&self.params, "write_batch_size")?
+        );
+        self.init_file("./output/all_messages.txt")
+            .context("could not initialize file `./output/all_messages.txt`")
     }
 
-    fn on_message(&mut self, message: &Message, _: &CheatAnalyserState, pstate: &ParserState, tick: DemoTick,) -> Result<Vec<Detection>, Error> {
+    fn on_message(&mut self, message: &Message, _: &CheatAnalyserState, pstate: &ParserState, tick: DemoTick) -> Result<Vec<Detection>> {
         let mut message = format!("({tick}) {:#?}", message);
 
         while let Some(start) = message.find("ClassId(") {
-            let end = message[start + 9..].find(")").unwrap() + start + 9;
+            let end = message[start + 9..].find(")").context("unmatched parenthesis for `ClassId`")? + start + 9;
             let id = message[start + 9..end].trim();
             let id = id.strip_suffix(",").unwrap_or(id);
-            let id: u16 = id.parse().unwrap();
+            let id: u16 = id.parse().context(format!("invalid id {:?}", id))?;
             let class = pstate
                 .server_classes
                 .iter()
                 .find(|sc| u16::from(sc.id) == id)
-                .unwrap();
+                .context("could not find class in `ClassId`")?;
             message.replace_range(start..=end, class.name.as_str());
         }
 
         self.msg_history.push(message);
-        let write_batch_size: i32 = get_parameter_value(&self.params, "write_batch_size");
-    
+        let write_batch_size: i32 = get_parameter_value(&self.params, "write_batch_size")?;
+
         if self.msg_history.len() > write_batch_size as usize {
-            self.write_messages_to_file();
-    
+            self.write_messages_to_file().context("could not write message history to file")?;
+
             self.msg_history.clear();
         }
 
@@ -100,13 +99,12 @@ impl CheatAlgorithm<'_> for AllMessages {
     }
 
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
-
-        if self.msg_history.len() > 0 {
-            self.write_messages_to_file();
+        if !self.msg_history.is_empty() {
+            self.write_messages_to_file()?;
             self.msg_history.clear();
         }
 
-        let _ = self.file.as_mut().unwrap().flush();
+        let _ = self.file.as_mut().context("self.file was None but was expected to be Some")?.flush();
 
         Ok(vec![])
     }
@@ -115,6 +113,3 @@ impl CheatAlgorithm<'_> for AllMessages {
         Some(&mut self.params)
     }
 }
-
-
-

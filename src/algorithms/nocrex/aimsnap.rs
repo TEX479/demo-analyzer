@@ -3,9 +3,11 @@
 use std::{collections::HashMap, ops::Range};
 
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState}, lib::parameters::get_parameter_value, util::{helpers::viewangle_delta, nocrex::jankguard::JankGuard}
+    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
+    lib::parameters::get_parameter_value,
+    util::{helpers::viewangle_delta, nocrex::jankguard::JankGuard},
 };
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
@@ -43,55 +45,42 @@ impl<'a> CheatAlgorithm<'a> for AimSnap {
         "nocrex/aimsnap"
     }
 
-    fn on_tick(
-        &mut self,
-        state: &CheatAnalyserState,
-        _: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+        self.jg.on_tick(state).context(format!("jankguard errored in on_tick with state {:?}", state))?;
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
-        let noise_min: f32 = get_parameter_value(&self.params, "noise_min");
-        let noise_max: f32 = get_parameter_value(&self.params, "noise_max");
-        let snap_threshold: f32 = get_parameter_value(&self.params, "snap_threshold");
+        let noise_min: f32 = get_parameter_value(&self.params, "noise_min")?;
+        let noise_max: f32 = get_parameter_value(&self.params, "noise_max")?;
+        let snap_threshold: f32 = get_parameter_value(&self.params, "snap_threshold")?;
 
         let noise_range: Range<f32> = noise_min..noise_max;
 
         self.ticks.insert(0, (ticknum, HashMap::new()));
         self.ticks.truncate(5);
 
-        for player in players.iter().filter(|p| {
-            p.in_pvs
-                && p.state == PlayerState::Alive
-                && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-        }) {
+        for player in players
+            .iter()
+            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
+        {
             let info = match &player.info {
                 Some(info) => info,
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).unwrap());
+            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
 
-            let ticks_since_event = self
-                .jg
-                .teleported(&steam_id, ticknum)
-                .min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
                 // Ignore detections +-60 ticks from a teleport or spawn event
                 if ticks_since_event == 0 {
-                    self.detections
-                        .retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
+                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
                 }
                 continue;
             }
 
-            self.ticks
-                .get_mut(0)
-                .unwrap()
-                .1
-                .insert(steam_id.clone(), player.clone()); // Store angle for this tick for next ticks
+            self.ticks.get_mut(0).context("no first tick in AimSnap")?.1.insert(steam_id, player.clone()); // Store angle for this tick for next ticks
 
             let angle_history: Vec<_> = self
                 .ticks
@@ -117,14 +106,10 @@ impl<'a> CheatAlgorithm<'a> for AimSnap {
                 deltas.push(mag_delta);
             }
 
-            if noise_range.contains(deltas.first().unwrap())
-                && noise_range.contains(deltas.last().unwrap())
+            if noise_range.contains(deltas.first().context("no first delta in AimSnap")?)
+                && noise_range.contains(deltas.last().context("no last delta in AimSnap")?)
                 && deltas.iter().filter(|&d| noise_range.contains(d)).count() == deltas.len() - 1
-                && deltas
-                    .iter()
-                    .filter(|&&d| d > snap_threshold)
-                    .count()
-                    == 1
+                && deltas.iter().filter(|&&d| d > snap_threshold).count() == 1
                 && self.jg.fired(&steam_id, ticknum) < 5
             {
                 self.detections.push(Detection {

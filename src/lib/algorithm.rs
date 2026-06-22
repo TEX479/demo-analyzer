@@ -1,37 +1,39 @@
 // Import algorithm struct here.
 pub use crate::algorithms::{
     all_messages::AllMessages,
-    viewangles_180degrees::ViewAngles180Degrees,
-    viewangles_to_csv::ViewAnglesToCSV,
-    write_to_file::WriteToFile,
     angle_history::AngleHistory,
     backtrack::BackTrack,
     double_tap::DoubleTap,
-    nocrex:: {
-        aimsnap::AimSnap, 
-        angle_repeat::AngleRepeat, 
-        oob_pitch::OOBPitch,
-    }
+    nocrex::{aimsnap::AimSnap, angle_repeat::AngleRepeat, oob_pitch::OOBPitch},
+    viewangles_180degrees::ViewAngles180Degrees,
+    viewangles_to_csv::ViewAnglesToCSV,
+    write_to_file::WriteToFile,
 };
 
-use anyhow::Error;
 use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
+use anyhow::Error;
 use bitbuffer::BitRead;
-use serde_json::Value;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use tf_demo_parser::{demo::{data::DemoTick, header::Header, message::Message, parser::RawPacketStream}, MessageType};
+use tf_demo_parser::{
+    demo::{data::DemoTick, header::Header, message::Message, parser::RawPacketStream},
+    MessageType,
+};
 
 pub use tf_demo_parser::{Demo, DemoParser, Parse, ParseError, ParserState, Stream};
 
-use crate::{base::{cheat_analyser_base::CheatAnalyser, demo_handler_base::CheatDemoHandler}, dev_print};
+use crate::{
+    base::{cheat_analyser_base::CheatAnalyser, demo_handler_base::CheatDemoHandler},
+    dev_print,
+};
 
 pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm<'static> + Send>> {
     vec![
         Box::new(AllMessages::new()),
         Box::new(ViewAngles180Degrees::new()),
         Box::new(ViewAnglesToCSV::new()),
-        Box::new(WriteToFile::new()),
+        Box::new(WriteToFile::new().expect("could not get new WriteToFile algorithm")),
         Box::new(OOBPitch::new()),
         Box::new(AngleRepeat::new()),
         Box::new(AngleHistory::new()),
@@ -63,22 +65,18 @@ pub fn analyse<'a>(demo: &Demo, algorithms: Vec<Box<dyn CheatAlgorithm<'a> + Sen
                 continue;
             }
         };
-        let _ = handler.handle_packet(packet)?;
+        handler.handle_packet(packet)?;
     }
-    let _ = handler.analyser.finish()?;
+    handler.analyser.finish()?;
     Ok(handler.analyser)
 }
 
 pub trait CheatAlgorithm<'a> {
-    fn default(&self) -> bool {
-        panic!("default() not set for {}", std::any::type_name::<Self>());
-    }
+    fn default(&self) -> bool;
 
-    fn algorithm_name(&self) -> &str {
-        panic!("algorithm_name() not implemented for {}", std::any::type_name::<Self>());
-    }
+    fn algorithm_name(&self) -> &str;
 
-    fn params(&mut self) -> Option<&mut Parameters>{
+    fn params(&mut self) -> Option<&mut Parameters> {
         None
     }
 
@@ -126,5 +124,5 @@ pub struct Detection {
     pub tick: u32,
     pub algorithm: String,
     pub player: u64,
-    pub data: Value
+    pub data: Value,
 }
