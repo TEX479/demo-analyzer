@@ -74,16 +74,15 @@ impl JankGuard {
                         const BULLETS_PLAYER: SendPropIdentifier = SendPropIdentifier::new("DT_TEFireBullets", "m_iPlayer");
                         const ANIM_PLAYER: SendPropIdentifier = SendPropIdentifier::new("DT_TEPlayerAnimEvent", "m_hPlayer");
 
-                        if let Some(prop) = event.props.iter().find(|p| matches!(p.identifier, BULLETS_PLAYER | ANIM_PLAYER)) {
-                            if let Some(id64) = i64::try_from(&prop.value)
+                        if let Some(prop) = event.props.iter().find(|p| matches!(p.identifier, BULLETS_PLAYER | ANIM_PLAYER))
+                            && let Some(id64) = i64::try_from(&prop.value)
                                 .ok()
                                 .and_then(|id| id.try_into().ok())
                                 .map(crate::util::helpers::handle_to_entid)
                                 .and_then(|id| state.entid_to_userid.get(&id))
                                 .and_then(|uid| state.userid_to_id64.get(uid))
-                            {
-                                self.player_data.entry(*id64).or_default().last_fire = tick.into();
-                            }
+                        {
+                            self.player_data.entry(*id64).or_default().last_fire = tick.into();
                         }
                     }
                 }

@@ -16,16 +16,16 @@ use tf_demo_parser::demo::data::DemoTick;
 use tf_demo_parser::demo::gameevent_gen::ObjectDestroyedEvent;
 use tf_demo_parser::demo::gamevent::GameEvent;
 use tf_demo_parser::demo::header::Header;
+use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::message::gameevent::GameEventMessage;
 use tf_demo_parser::demo::message::packetentities::{EntityId, PacketEntity, UpdateType};
-use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::packet::datatable::{ParseSendTable, ServerClass, ServerClassName};
 use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
+use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::parser::analyser::UserInfo;
 pub use tf_demo_parser::demo::parser::analyser::{Class, Team, UserId};
 use tf_demo_parser::demo::parser::handler::BorrowMessageHandler;
-use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::sendprop::{SendProp, SendPropIdentifier, SendPropValue};
 use tf_demo_parser::demo::vector::{Vector, VectorXY};
 use tf_demo_parser::{MessageType, ParserState, ReadResult, Stream};
@@ -587,6 +587,13 @@ impl<'a> CheatAnalyser<'a> {
 
         self.last_progress_update_time = Instant::now();
         self.progress.push(tick);
+        // PERF:
+        // self.progress = self
+        //     .progress
+        //     .iter()
+        //     .skip(self.progress.len().saturating_sub(TPS_ROLLING_AVERAGE_WINDOW as usize))
+        //     .copied()
+        //     .collect();
         while self.progress.len() > TPS_ROLLING_AVERAGE_WINDOW as usize {
             self.progress.remove(0);
         }
@@ -605,11 +612,7 @@ impl<'a> CheatAnalyser<'a> {
 
     pub fn get_tick_count_u32(&self) -> u32 {
         let Some(header) = self.header.as_ref() else { return self.tick.into() };
-        if self.tick > header.ticks {
-            self.tick.into()
-        } else {
-            header.ticks
-        }
+        if self.tick > header.ticks { self.tick.into() } else { header.ticks }
     }
 
     pub fn handle_entity(&mut self, entity: &PacketEntity, parser_state: &ParserState) {
@@ -631,26 +634,26 @@ impl<'a> CheatAnalyser<'a> {
 
     pub fn handle_player_resource(&mut self, entity: &PacketEntity, parser_state: &ParserState) {
         for prop in entity.props(parser_state) {
-            if let Some((table_name, prop_name)) = prop.identifier.names() {
-                if let Ok(player_id) = u32::from_str(prop_name.as_str()) {
-                    let entity_id = EntityId::from(player_id);
-                    let mut mappings: Vec<(EntityId, UserId)> = vec![];
-                    if let Some(player) = self.state.players.iter_mut().find(|player| player.entity == entity_id) {
-                        if let Some(info) = &player.info {
-                            mappings.push((entity_id, info.user_id));
-                        };
-                        match table_name.as_str() {
-                            "m_iTeam" => player.team = Team::new(i64::try_from(&prop.value).unwrap_or_default()),
-                            "m_iMaxHealth" => player.max_health = i64::try_from(&prop.value).unwrap_or_default() as u16,
-                            "m_iPlayerClass" => player.class = Class::new(i64::try_from(&prop.value).unwrap_or_default()),
-                            "m_iChargeLevel" => player.charge = i64::try_from(&prop.value).unwrap_or_default() as u8,
-                            "m_iPing" => player.ping = i64::try_from(&prop.value).unwrap_or_default() as u16,
-                            _ => {}
-                        }
+            if let Some((table_name, prop_name)) = prop.identifier.names()
+                && let Ok(player_id) = u32::from_str(prop_name.as_str())
+            {
+                let entity_id = EntityId::from(player_id);
+                let mut mappings: Vec<(EntityId, UserId)> = vec![];
+                if let Some(player) = self.state.players.iter_mut().find(|player| player.entity == entity_id) {
+                    if let Some(info) = &player.info {
+                        mappings.push((entity_id, info.user_id));
+                    };
+                    match table_name.as_str() {
+                        "m_iTeam" => player.team = Team::new(i64::try_from(&prop.value).unwrap_or_default()),
+                        "m_iMaxHealth" => player.max_health = i64::try_from(&prop.value).unwrap_or_default() as u16,
+                        "m_iPlayerClass" => player.class = Class::new(i64::try_from(&prop.value).unwrap_or_default()),
+                        "m_iChargeLevel" => player.charge = i64::try_from(&prop.value).unwrap_or_default() as u8,
+                        "m_iPing" => player.ping = i64::try_from(&prop.value).unwrap_or_default() as u16,
+                        _ => {}
                     }
-                    for (entity_id, user_id) in mappings {
-                        self.state.set_entid_to_userid(entity_id, user_id);
-                    }
+                }
+                for (entity_id, user_id) in mappings {
+                    self.state.set_entid_to_userid(entity_id, user_id);
                 }
             }
         }

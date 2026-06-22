@@ -7,10 +7,10 @@ use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
-use tf_demo_parser::{demo::message::Message, ParserState};
+use tf_demo_parser::{ParserState, demo::message::Message};
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 
 pub struct OOBPitch {
     last_detections: HashSet<String>,
@@ -61,10 +61,10 @@ impl<'a> CheatAlgorithm<'a> for OOBPitch {
     ) -> Result<Vec<Detection>, Error> {
         let mut submitted_detections = Vec::new();
 
-        if let Message::ServerInfo(event) = message {
-            if self.server_name.is_empty() {
-                self.server_name = event.server_name.trim().to_string();
-            }
+        if let Message::ServerInfo(event) = message
+            && self.server_name.is_empty()
+        {
+            self.server_name = event.server_name.trim().to_string();
         }
 
         if let Message::NetTick(_) = message {
