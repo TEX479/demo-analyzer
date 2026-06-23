@@ -29,11 +29,13 @@ notify = { version = "8.2.0", optional = true }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 steamlocate = { version = "2.1.0", optional = true }
+rayon = { version = "1.12.0", optional = true }
 
 [features]
 # default = [ "live_analyzer" ]
 gui = [ "eframe", "egui" ]
 live_analyzer = [ "notify", "steamlocate" ]
+bulk_analyzer = [ "steamlocate", "rayon" ]
 
 [[bin]]
 name = "gui"
@@ -42,3 +44,7 @@ required-features = [ "gui" ]
 [[bin]]
 name = "live_analyzer"
 required-features = [ "live_analyzer" ]
+
+[[bin]]
+name = "bulk_analyzer"
+required-features = [ "bulk_analyzer" ]

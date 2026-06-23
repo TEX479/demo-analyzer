@@ -1,6 +1,6 @@
 use analysis_template::{
     PRINT_VOTES, SILENT,
-    lib::algorithm::{CheatAlgorithm, get_algorithms},
+    lib::algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, CheatAlgorithm, DoubleTap, OOBPitch, ViewAngles180Degrees},
     live_analyzer::live_analysis,
 };
 use anyhow::Context;
@@ -54,11 +54,14 @@ fn locate_tf2_folder() -> anyhow::Result<PathBuf> {
     Ok(library.resolve_app_dir(&app))
 }
 
-const DESIRED_ALGORITHMS: [&str; 4] = ["viewangles_180degrees", "nocrex/aimsnap", "backtrack", "doubletap"];
-
 fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
-    get_algorithms()
-        .into_iter()
-        .filter(|algo| DESIRED_ALGORITHMS.into_iter().any(|name| algo.algorithm_name().starts_with(name)))
-        .collect()
+    vec![
+        Box::new(ViewAngles180Degrees::new()),
+        Box::new(OOBPitch::new()),
+        Box::new(AngleRepeat::new()),
+        Box::new(AngleHistory::new()),
+        Box::new(AimSnap::new()),
+        Box::new(BackTrack::new()),
+        Box::new(DoubleTap::new()),
+    ]
 }
