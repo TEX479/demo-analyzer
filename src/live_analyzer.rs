@@ -1,5 +1,8 @@
 use crate::{
-    base::{cheat_analyser_base::CheatAnalyser, demo_handler_base::CheatDemoHandler},
+    base::{
+        cheat_analyser_base::{CheatAnalyser, CheatAnalyserState},
+        demo_handler_base::CheatDemoHandler,
+    },
     lib::algorithm::CheatAlgorithm,
 };
 use anyhow::Context;
@@ -141,7 +144,15 @@ impl DemoFileManager {
                 .iter()
                 .skip(demo_file.detection_length)
                 .for_each(|detection| {
-                    tracing::warn!("detection for player {} from algorithm {}", detection.player, detection.algorithm);
+                    let player_name = get_player_name(&demo_file.handler.analyser.state, detection.player)
+                        .map(|s| format!("{s:?}"))
+                        .unwrap_or("???".to_string());
+                    tracing::warn!(
+                        "detection for player {} ({}) from algorithm {}",
+                        player_name,
+                        detection.player,
+                        detection.algorithm
+                    );
                     tracing::warn!("{}", detection.data);
                 });
             demo_file.detection_length = demo_file.handler.analyser.detections.len();
@@ -191,4 +202,12 @@ where
 
     // TODO: return cheat analyzers
     Ok(vec![])
+}
+
+pub fn get_player_name(state: &CheatAnalyserState, steam_id: u64) -> Option<String> {
+    state
+        .players
+        .iter()
+        .find(|p| p.info.as_ref().is_some_and(|i| i.steam_id.trim() == steam_id.to_string()))
+        .and_then(|player| player.info.as_ref().map(|i| i.name.clone()))
 }
