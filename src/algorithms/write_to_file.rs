@@ -7,7 +7,7 @@ use tf_demo_parser::ParserState;
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 
 #[allow(dead_code)]
 pub struct WriteToFile {
@@ -57,7 +57,7 @@ impl WriteToFile {
 }
 
 // lifetimes not needed for this algorithm, but is included to serve as an example of how to handle them.
-impl CheatAlgorithm<'_> for WriteToFile {
+impl CheatAlgorithm for WriteToFile {
     fn default(&self) -> bool {
         false
     }

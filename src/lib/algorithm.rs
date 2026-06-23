@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use tf_demo_parser::{
-    demo::{data::DemoTick, header::Header, message::Message, parser::RawPacketStream},
     MessageType,
+    demo::{data::DemoTick, header::Header, message::Message, parser::RawPacketStream},
 };
 
 pub use tf_demo_parser::{Demo, DemoParser, Parse, ParseError, ParserState, Stream};
@@ -28,7 +28,7 @@ use crate::{
     dev_print,
 };
 
-pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm<'static> + Send>> {
+pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
     vec![
         Box::new(AllMessages::new()),
         Box::new(ViewAngles180Degrees::new()),
@@ -43,7 +43,7 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm<'static> + Send>> {
     ]
 }
 
-pub fn analyse<'a>(demo: &Demo, algorithms: Vec<Box<dyn CheatAlgorithm<'a> + Send>>) -> anyhow::Result<CheatAnalyser<'a>> {
+pub fn analyse(demo: &Demo, algorithms: Vec<Box<dyn CheatAlgorithm + Send>>) -> anyhow::Result<CheatAnalyser> {
     let mut stream = demo.get_stream();
     let header: Header = Header::read(&mut stream)?;
     let mut packets = RawPacketStream::new(stream);
@@ -71,7 +71,7 @@ pub fn analyse<'a>(demo: &Demo, algorithms: Vec<Box<dyn CheatAlgorithm<'a> + Sen
     Ok(handler.analyser)
 }
 
-pub trait CheatAlgorithm<'a> {
+pub trait CheatAlgorithm {
     fn default(&self) -> bool;
 
     fn algorithm_name(&self) -> &str;

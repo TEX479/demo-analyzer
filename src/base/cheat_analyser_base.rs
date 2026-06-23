@@ -325,9 +325,9 @@ lazy_static! {
     static ref HANDLED_MESSAGE_TYPES: Mutex<Vec<MessageType>> = Mutex::new(vec![MessageType::PacketEntities, MessageType::GameEvent, MessageType::NetTick]);
 }
 
-pub struct CheatAnalyser<'a> {
+pub struct CheatAnalyser {
     pub state: CheatAnalyserState,
-    pub algorithms: Vec<Box<dyn CheatAlgorithm<'a> + 'a + Send>>,
+    pub algorithms: Vec<Box<dyn CheatAlgorithm + Send>>,
     pub detections: Vec<Detection>,
     pub header: Option<Header>,
     pub tick: DemoTick,
@@ -336,7 +336,7 @@ pub struct CheatAnalyser<'a> {
     class_names: Vec<ServerClassName>, // indexed by ClassId
 }
 
-impl<'a> Default for CheatAnalyser<'a> {
+impl Default for CheatAnalyser {
     fn default() -> Self {
         Self {
             state: Default::default(),
@@ -351,7 +351,7 @@ impl<'a> Default for CheatAnalyser<'a> {
     }
 }
 
-impl MessageHandler for CheatAnalyser<'_> {
+impl MessageHandler for CheatAnalyser {
     type Output = CheatAnalyserState;
 
     fn does_handle(message_type: MessageType) -> bool {
@@ -372,7 +372,8 @@ impl MessageHandler for CheatAnalyser<'_> {
                 }
             }
             Message::NetTick(_) => {
-                self.check_progress();
+                // TODO: figure out something that works for live analzing
+                // self.check_progress();
                 for algorithm in &mut self.algorithms {
                     if let Ok(detections) = algorithm.on_tick(&self.state, parser_state) {
                         self.detections.extend(detections)
@@ -454,14 +455,14 @@ impl MessageHandler for CheatAnalyser<'_> {
     }
 }
 
-impl BorrowMessageHandler for CheatAnalyser<'_> {
+impl BorrowMessageHandler for CheatAnalyser {
     fn borrow_output(&self, _state: &ParserState) -> &Self::Output {
         &self.state
     }
 }
 
-impl<'a> CheatAnalyser<'a> {
-    pub fn new(algorithms: Vec<Box<dyn CheatAlgorithm<'a> + 'a + Send>>) -> Self {
+impl CheatAnalyser {
+    pub fn new(algorithms: Vec<Box<dyn CheatAlgorithm + Send>>) -> Self {
         let mut message_types = HANDLED_MESSAGE_TYPES.lock().expect("the HANDLED_MESSAGE_TYPES mutex must be lockable");
         // Figure out what message types we're going to be using.
         let mut specified_message_types: Vec<MessageType> = vec![];

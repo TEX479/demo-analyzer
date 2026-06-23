@@ -7,7 +7,7 @@ use crate::{
 };
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 
 use anyhow::{Context, Error};
 use serde_json::json;
@@ -36,7 +36,7 @@ impl AngleHistory {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for AngleHistory {
+impl CheatAlgorithm for AngleHistory {
     fn default(&self) -> bool {
         true
     }

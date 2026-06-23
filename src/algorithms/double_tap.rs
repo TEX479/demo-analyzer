@@ -37,7 +37,7 @@ fn is_cleaver_or_wrap_assassin(weapon_id: u32, damage: u32) -> bool {
     weapon_id == 16 && (damage == 50 || (3..=8).contains(&damage))
 }
 
-impl<'a> CheatAlgorithm<'a> for DoubleTap {
+impl CheatAlgorithm for DoubleTap {
     fn default(&self) -> bool {
         true
     }

@@ -39,7 +39,7 @@ fn is_backstab(damage: u16, is_crit: bool, weapon_id: u16, victim_health: u16) -
     is_crit && weapon_id == 7 && (damage > 600 || damage as f32 > victim_health as f32 * 5.5)
 }
 
-impl<'a> CheatAlgorithm<'a> for BackTrack {
+impl CheatAlgorithm for BackTrack {
     fn default(&self) -> bool {
         true
     }

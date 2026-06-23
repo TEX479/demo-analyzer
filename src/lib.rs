@@ -33,6 +33,9 @@ pub mod lib {
     pub mod parameters;
 }
 
+#[cfg(feature = "live_analyzer")]
+pub mod live_analyzer;
+
 pub static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub static PROGRESS_CURRENT: AtomicU32 = AtomicU32::new(0);

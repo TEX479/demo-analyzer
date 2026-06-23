@@ -39,7 +39,7 @@ impl Default for OOBPitch {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for OOBPitch {
+impl CheatAlgorithm for OOBPitch {
     fn default(&self) -> bool {
         true
     }

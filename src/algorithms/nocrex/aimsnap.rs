@@ -36,7 +36,7 @@ impl AimSnap {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for AimSnap {
+impl CheatAlgorithm for AimSnap {
     fn default(&self) -> bool {
         true
     }

@@ -6,7 +6,7 @@ use std::io::Write;
 use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 use crate::util::helpers::viewangle_delta;
 use anyhow::{Context, Error};
 use tf_demo_parser::ParserState;
@@ -80,7 +80,7 @@ impl Default for ViewAnglesToCSV {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for ViewAnglesToCSV {
+impl CheatAlgorithm for ViewAnglesToCSV {
     fn default(&self) -> bool {
         false
     }

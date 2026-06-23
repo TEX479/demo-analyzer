@@ -41,7 +41,7 @@ impl Default for ViewAngles180Degrees {
 // You can attach whatever json data you want to each detection via the "data" field.
 // You don't have to implement every function in CheatAlgorithm; see its definition for a complete list of functions.
 
-impl<'a> CheatAlgorithm<'a> for ViewAngles180Degrees {
+impl CheatAlgorithm for ViewAngles180Degrees {
     // REQUIRED: Should this algorithm run by default if -a isn't specified?
     // Generally should be true, unless you're doing dev-only stuff (writing to files, printing debug output, etc).
     fn default(&self) -> bool {

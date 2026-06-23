@@ -10,7 +10,7 @@ use tf_demo_parser::{MessageType, ParserState};
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 
 // header is not needed for this algorithm, but is included to serve as an example of how to handle the lifetimes.
 #[allow(dead_code)]
@@ -48,7 +48,7 @@ impl Default for AllMessages {
     }
 }
 
-impl CheatAlgorithm<'_> for AllMessages {
+impl CheatAlgorithm for AllMessages {
     fn default(&self) -> bool {
         false
     }
