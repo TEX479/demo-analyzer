@@ -1,6 +1,6 @@
 use crate::{
     base::{cheat_analyser_base::CheatAnalyser, demo_handler_base::CheatDemoHandler},
-    lib::algorithm::{CheatAlgorithm, Detection},
+    lib::algorithm::CheatAlgorithm,
 };
 use anyhow::Context;
 use bitbuffer::{BitError, BitRead, BitReadBuffer, BitReadStream, LittleEndian};
@@ -11,16 +11,16 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tf_demo_parser::demo::{header::Header, packet::Packet, parser::RawPacketStream};
+use tf_demo_parser::demo::{header::Header, parser::RawPacketStream};
 
 struct DemoFile {
     pub read_size: u64,
     /// if the file's header has not been parsed yet
-    pub is_new: bool,
     pub handler: CheatDemoHandler<CheatAnalyser>,
     // TODO: add support for remainder from parsing
-    // pub parsed_bits: usize,
-    // pub half_parsed_buffer: Vec<u8>,
+    pub header: Option<Header>,
+    handled_bits: usize,
+    pub bytes: Vec<u8>,
     detection_length: usize,
 }
 
@@ -28,23 +28,53 @@ impl DemoFile {
     fn new(handler: CheatDemoHandler<CheatAnalyser>) -> Self {
         Self {
             read_size: 0,
-            is_new: true,
             handler,
+            header: None,
+            handled_bits: 0,
+            bytes: Vec::new(),
             detection_length: 0,
         }
     }
 
-    pub fn handle_packet<'a>(&mut self, packet: Packet<'a>) -> anyhow::Result<Vec<Detection>> {
-        self.handler
-            .handle_packet(packet.clone())
-            .context(format!("could not handle packet {:?}", packet))?;
-        if self.detection_length < self.handler.analyser.detections.len() {
-            let output = self.handler.analyser.detections.iter().skip(self.detection_length).cloned().collect::<Vec<_>>();
-            self.detection_length = self.handler.analyser.detections.len().saturating_sub(1);
-            Ok(output)
-        } else {
-            Ok(Vec::new())
+    pub fn process_next_chunk(&mut self) -> anyhow::Result<()> {
+        let buffer = BitReadBuffer::new(&self.bytes, LittleEndian);
+        let mut stream = BitReadStream::new(buffer);
+        stream
+            .set_pos(self.handled_bits)
+            .context(format!("could not skip to ahead to {:?}", self.handled_bits))?;
+
+        if self.header.is_none() {
+            let header = Header::read(&mut stream).context("could not parse header")?;
+            tracing::info!("{:?}", header);
+            self.header = Some(header);
+            self.handled_bits = stream.pos();
         }
+
+        let mut packets = RawPacketStream::new(stream);
+        loop {
+            match packets.next(&self.handler.state_handler) {
+                Ok(Some(packet)) => {
+                    self.handler
+                        .handle_packet(packet.clone())
+                        .context(format!("could not handle packet {:?}", packet))?;
+                    self.handled_bits = packets.pos();
+                }
+                Ok(None) => break,
+                Err(tf_demo_parser::ParseError::ReadError(BitError::NotEnoughData { requested, bits_left })) => {
+                    tracing::warn!(
+                        "Tried to read packet but there were not enough bits. Requested {}, Remaining {}",
+                        requested,
+                        bits_left
+                    );
+                    break;
+                }
+                Err(e) => {
+                    return Err(anyhow::Error::new(e).context("could not get next packet from demo bytes"));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -98,71 +128,26 @@ impl DemoFileManager {
             demo_file.read_size += byte_count_read;
             buffer
         };
+        demo_file.bytes.extend(bytes_new);
 
-        let mut stream = BitReadStream::new(BitReadBuffer::new(&bytes_new, LittleEndian));
-        // stream.skip_bits(demo_file.parsed_size).context(format!(
-        //     "could not skip BitReadStream of bytes.len() = {} to desired bit {}",
-        //     demo_file.bytes_in_buffer.len(),
-        //     demo_file.parsed_size
-        // ))?;
+        let ret_val = demo_file.process_next_chunk();
 
-        if demo_file.is_new {
-            let header = Header::read(&mut stream).context("could not read Header")?;
-            tracing::info!("new demo header: {:?}", header);
-            demo_file.is_new = false;
+        // show detections
+        if demo_file.handler.analyser.detections.len() > demo_file.detection_length {
+            demo_file
+                .handler
+                .analyser
+                .detections
+                .iter()
+                .skip(demo_file.detection_length)
+                .for_each(|detection| {
+                    tracing::warn!("detection for player {} from algorithm {}", detection.player, detection.algorithm);
+                    tracing::warn!("{}", detection.data);
+                });
+            demo_file.detection_length = demo_file.handler.analyser.detections.len();
         }
 
-        let mut packets: RawPacketStream = RawPacketStream::new(stream);
-        loop {
-            match packets.next(&demo_file.handler.state_handler) {
-                Ok(Some(packet)) => {
-                    demo_file
-                        .handler
-                        .handle_packet(packet.clone())
-                        .context(format!("could not handle packet {:?}", packet))?;
-
-                    // TODO: return detections instead of showing them here
-                    if demo_file.handler.analyser.detections.len() > demo_file.detection_length {
-                        demo_file
-                            .handler
-                            .analyser
-                            .detections
-                            .iter()
-                            .skip(demo_file.detection_length)
-                            .for_each(|detection| {
-                                tracing::warn!("detection for player {} from algorithm {}", detection.player, detection.algorithm);
-                                tracing::warn!("{}", detection.data);
-                            });
-                        demo_file.detection_length = demo_file.handler.analyser.detections.len();
-                    }
-                }
-                Ok(None) => {
-                    break;
-                }
-                Err(tf_demo_parser::ParseError::ReadError(BitError::NotEnoughData { requested, bits_left })) => {
-                    let new_handler = CheatDemoHandler::with_analyser(CheatAnalyser::new(algorithm_getter()));
-                    *demo_file = DemoFile::new(new_handler);
-                    // tracing::warn!(
-                    //     "Not enough bits for packet; rewinding demo file. Requested: {}, Remaining: {}, demo path: {:?}",
-                    //     requested,
-                    //     bits_left,
-                    //     path
-                    // );
-                    return Err(anyhow::anyhow!(
-                        "Tried to read packet but there were not enough bits. Requested: {}, Remaining: {}",
-                        requested,
-                        bits_left
-                    ));
-                }
-                Err(e) => {
-                    let new_handler = CheatDemoHandler::with_analyser(CheatAnalyser::new(algorithm_getter()));
-                    *demo_file = DemoFile::new(new_handler);
-                    return Err(anyhow::anyhow!("Error reading demo packet: {}", e));
-                }
-            }
-        }
-
-        Ok(())
+        ret_val
     }
 
     #[must_use]
