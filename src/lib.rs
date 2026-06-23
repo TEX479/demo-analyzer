@@ -37,6 +37,7 @@ pub mod lib {
 pub mod live_analyzer;
 
 pub static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static PRINT_VOTES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub static PROGRESS_CURRENT: AtomicU32 = AtomicU32::new(0);
 pub static PROGRESS_TOTAL: AtomicU32 = AtomicU32::new(0);

@@ -5,6 +5,7 @@
 // Additional functionality that has broad utility can be merged into this base analyser.
 
 use anyhow::Error;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -31,8 +32,8 @@ use tf_demo_parser::demo::vector::{Vector, VectorXY};
 use tf_demo_parser::{MessageType, ParserState, ReadResult, Stream};
 use web_time::Instant;
 
-use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
+use crate::{PRINT_VOTES, dev_print};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum PlayerState {
@@ -416,6 +417,42 @@ impl MessageHandler for CheatAnalyser {
                         let steamid64 = u64::from(steamid.unwrap_or(0.into()));
                         self.state.set_userid_to_id64(event.user_id.into(), steamid64);
                     }
+                }
+                GameEvent::VoteStarted(e) if PRINT_VOTES.load(std::sync::atomic::Ordering::Relaxed) => {
+                    tracing::info!("New vote started -> {:?}", e);
+                }
+                GameEvent::VoteOptions(e) if PRINT_VOTES.load(std::sync::atomic::Ordering::Relaxed) => {
+                    let mut vote_options_vec = Vec::new();
+                    for i in 0..e.count {
+                        let opt = match i {
+                            0 => e.option_1.to_string(),
+                            1 => e.option_2.to_string(),
+                            2 => e.option_3.to_string(),
+                            3 => e.option_4.to_string(),
+                            4 => e.option_5.to_string(),
+                            _ => String::new(),
+                        };
+                        vote_options_vec.push(opt);
+                    }
+                    let vote_options = vote_options_vec.into_iter().enumerate().map(|(i, s)| format!("{}: {:?}", i, s)).join(", ");
+                    tracing::info!("vote options: {}", vote_options);
+                }
+                GameEvent::VoteCast(e) if PRINT_VOTES.load(std::sync::atomic::Ordering::Relaxed) => {
+                    if let Some(player_identifier) = self
+                        .state
+                        .players
+                        .iter()
+                        .find(|p| p.info.as_ref().is_some_and(|i| i.entity_id == e.entity_id))
+                        .map(|player| player.info.as_ref().map(|i| i.name.clone()).unwrap_or(format!("{:?}", player.entity)))
+                    {
+                        tracing::info!("{} - {}", e.vote_option, player_identifier);
+                    }
+                }
+                GameEvent::VotePassed(_) if PRINT_VOTES.load(std::sync::atomic::Ordering::Relaxed) => {
+                    tracing::info!("vote success");
+                }
+                GameEvent::VoteFailed(_) if PRINT_VOTES.load(std::sync::atomic::Ordering::Relaxed) => {
+                    tracing::info!("vote failed");
                 }
                 _ => {}
             },

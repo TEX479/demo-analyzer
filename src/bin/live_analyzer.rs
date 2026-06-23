@@ -1,5 +1,5 @@
 use analysis_template::{
-    SILENT,
+    PRINT_VOTES, SILENT,
     lib::algorithm::{CheatAlgorithm, get_algorithms},
     live_analyzer::live_analysis,
 };
@@ -17,6 +17,7 @@ fn main() {
         .init();
 
     SILENT.store(true, std::sync::atomic::Ordering::Relaxed);
+    PRINT_VOTES.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let demo_path = if let Some(path) = args().nth(1) {
         path.into()
