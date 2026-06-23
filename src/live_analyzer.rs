@@ -15,9 +15,12 @@ use tf_demo_parser::demo::{header::Header, packet::Packet, parser::RawPacketStre
 
 struct DemoFile {
     pub read_size: u64,
-    pub parsed_size: usize,
+    /// if the file's header has not been parsed yet
+    pub is_new: bool,
     pub handler: CheatDemoHandler<CheatAnalyser>,
-    pub bytes_in_buffer: Vec<u8>,
+    // TODO: add support for remainder from parsing
+    // pub parsed_bits: usize,
+    // pub half_parsed_buffer: Vec<u8>,
     detection_length: usize,
 }
 
@@ -25,9 +28,8 @@ impl DemoFile {
     fn new(handler: CheatDemoHandler<CheatAnalyser>) -> Self {
         Self {
             read_size: 0,
-            parsed_size: 0,
+            is_new: true,
             handler,
-            bytes_in_buffer: Vec::new(),
             detection_length: 0,
         }
     }
@@ -82,7 +84,6 @@ impl DemoFileManager {
             std::cmp::Ordering::Greater => {}
             std::cmp::Ordering::Equal => return Ok(()),
             std::cmp::Ordering::Less => {
-                // TODO: do some check to test if the file really did shorten
                 tracing::info!("file shortend. reopening {:?}", path);
                 *demo_file = DemoFile::new(CheatDemoHandler::with_analyser(CheatAnalyser::new(algorithm_getter())));
             }
@@ -97,19 +98,18 @@ impl DemoFileManager {
             demo_file.read_size += byte_count_read;
             buffer
         };
-        let buffer_len_to_parse = bytes_new.len() * 8;
-        demo_file.bytes_in_buffer.extend(bytes_new);
 
-        let mut stream = BitReadStream::new(BitReadBuffer::new(&demo_file.bytes_in_buffer, LittleEndian));
-        stream.skip_bits(demo_file.parsed_size).context(format!(
-            "could not skip BitReadStream of bytes.len() = {} to desired bit {}",
-            demo_file.bytes_in_buffer.len(),
-            demo_file.parsed_size
-        ))?;
+        let mut stream = BitReadStream::new(BitReadBuffer::new(&bytes_new, LittleEndian));
+        // stream.skip_bits(demo_file.parsed_size).context(format!(
+        //     "could not skip BitReadStream of bytes.len() = {} to desired bit {}",
+        //     demo_file.bytes_in_buffer.len(),
+        //     demo_file.parsed_size
+        // ))?;
 
-        if demo_file.parsed_size == 0 {
+        if demo_file.is_new {
             let header = Header::read(&mut stream).context("could not read Header")?;
             tracing::info!("new demo header: {:?}", header);
+            demo_file.is_new = false;
         }
 
         let mut packets: RawPacketStream = RawPacketStream::new(stream);
@@ -140,17 +140,27 @@ impl DemoFileManager {
                     break;
                 }
                 Err(tf_demo_parser::ParseError::ReadError(BitError::NotEnoughData { requested, bits_left })) => {
+                    let new_handler = CheatDemoHandler::with_analyser(CheatAnalyser::new(algorithm_getter()));
+                    *demo_file = DemoFile::new(new_handler);
+                    // tracing::warn!(
+                    //     "Not enough bits for packet; rewinding demo file. Requested: {}, Remaining: {}, demo path: {:?}",
+                    //     requested,
+                    //     bits_left,
+                    //     path
+                    // );
                     return Err(anyhow::anyhow!(
                         "Tried to read packet but there were not enough bits. Requested: {}, Remaining: {}",
                         requested,
                         bits_left
                     ));
                 }
-                Err(e) => return Err(anyhow::anyhow!("Error reading demo packet: {}", e)),
+                Err(e) => {
+                    let new_handler = CheatDemoHandler::with_analyser(CheatAnalyser::new(algorithm_getter()));
+                    *demo_file = DemoFile::new(new_handler);
+                    return Err(anyhow::anyhow!("Error reading demo packet: {}", e));
+                }
             }
         }
-
-        demo_file.parsed_size += buffer_len_to_parse;
 
         Ok(())
     }
@@ -164,7 +174,11 @@ impl DemoFileManager {
             .paths
             .into_iter()
             .filter(|p| p.extension().is_some_and(|e| e == "dem"))
-            .filter_map(|p| self.handle_event_for_path(p, event.kind, algorithm_getter).err())
+            .filter_map(|p| {
+                self.handle_event_for_path(p.clone(), event.kind, algorithm_getter)
+                    .context(format!("error with demo at {:?}", p))
+                    .err()
+            })
             .collect::<Vec<anyhow::Error>>()
     }
 }
@@ -174,9 +188,9 @@ where
     A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
 {
     let mut demos = DemoFileManager::default();
-    let (tx, rx) = std::sync::mpsc::channel();
-    let config = notify::Config::default().with_poll_interval(Duration::from_secs_f32(1.0));
 
+    let (tx, rx) = std::sync::mpsc::channel();
+    let config = notify::Config::default().with_poll_interval(Duration::from_secs_f32(3.0));
     let mut watcher: RecommendedWatcher = Watcher::new(tx, config).context("could not construct watcher")?;
     watcher
         .watch(&demo_path, notify::RecursiveMode::Recursive)

@@ -1,4 +1,5 @@
 use analysis_template::{
+    SILENT,
     lib::algorithm::{CheatAlgorithm, get_algorithms},
     live_analyzer::live_analysis,
 };
@@ -14,6 +15,8 @@ fn main() {
         // .with_file(true)
         .with_max_level(Level::INFO)
         .init();
+
+    SILENT.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let demo_path = if let Some(path) = args().nth(1) {
         path.into()
