@@ -85,7 +85,7 @@ impl CheatAlgorithm for AngleRepeat {
             let third_angle = (player.view_angle, player.pitch_angle);
             self.ticks
                 .get_mut(0)
-                .context("no first tick in AngleRepeat")?
+                .expect("the first tick was inserted at the start of this function")
                 .1
                 .insert(steam_id, player.clone()); // Store angle for this tick for next ticks
 

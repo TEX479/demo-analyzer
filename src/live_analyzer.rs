@@ -14,6 +14,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use steamid_ng::SteamID;
 use tf_demo_parser::demo::{header::Header, parser::RawPacketStream};
 
 struct DemoFile {
@@ -144,16 +145,24 @@ impl DemoFileManager {
                 .iter()
                 .skip(demo_file.detection_length)
                 .for_each(|detection| {
-                    let player_name = get_player_name(&demo_file.handler.analyser.state, detection.player)
-                        .map(|s| format!("{s:?}"))
-                        .unwrap_or("???".to_string());
+                    let player_name = match get_player_name(&demo_file.handler.analyser.state, detection.player).map(|s| format!("{s:?}")) {
+                        Some(s) => s,
+                        None => {
+                            tracing::warn!(
+                                "could not get name for player with id {} from state {:?}",
+                                detection.player,
+                                demo_file.handler.analyser.state
+                            );
+                            "???".to_string()
+                        }
+                    };
                     tracing::warn!(
-                        "detection for player {} ({}) from algorithm {}",
+                        "detected {} for {} ({}). detecion data: {}",
+                        detection.algorithm,
                         player_name,
                         detection.player,
-                        detection.algorithm
+                        detection.data
                     );
-                    tracing::warn!("{}", detection.data);
                 });
             demo_file.detection_length = demo_file.handler.analyser.detections.len();
         }
@@ -204,10 +213,12 @@ where
     Ok(vec![])
 }
 
-pub fn get_player_name(state: &CheatAnalyserState, steam_id: u64) -> Option<String> {
+pub fn get_player_name(state: &CheatAnalyserState, steam_id: u64) -> Option<&str> {
     state
         .players
         .iter()
-        .find(|p| p.info.as_ref().is_some_and(|i| i.steam_id.trim() == steam_id.to_string()))
-        .and_then(|player| player.info.as_ref().map(|i| i.name.clone()))
+        .rev()
+        .filter_map(|p| p.info.as_ref())
+        .find(|info| SteamID::from_steam3(&info.steam_id).is_ok_and(|id| u64::from(id) == steam_id))
+        .map(|info| info.name.as_str())
 }
