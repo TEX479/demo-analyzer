@@ -23,8 +23,8 @@ struct DemoFile {
     pub handler: CheatDemoHandler<CheatAnalyser>,
     // TODO: add support for remainder from parsing
     pub header: Option<Header>,
-    handled_bits: usize,
-    pub bytes: Vec<u8>,
+    bytes_offset: usize,
+    bytes: Vec<u8>,
     detection_length: usize,
 }
 
@@ -34,7 +34,7 @@ impl DemoFile {
             read_size: 0,
             handler,
             header: None,
-            handled_bits: 0,
+            bytes_offset: 0,
             bytes: Vec::new(),
             detection_length: 0,
         }
@@ -44,14 +44,14 @@ impl DemoFile {
         let buffer = BitReadBuffer::new(&self.bytes, LittleEndian);
         let mut stream = BitReadStream::new(buffer);
         stream
-            .set_pos(self.handled_bits)
-            .context(format!("could not skip to ahead to {:?}", self.handled_bits))?;
+            .set_pos(self.bytes_offset)
+            .context(format!("could not skip to ahead to {:?}", self.bytes_offset))?;
 
         if self.header.is_none() {
             let header = Header::read(&mut stream).context("could not parse header")?;
             tracing::info!("{:?}", header);
             self.header = Some(header);
-            self.handled_bits = stream.pos();
+            self.bytes_offset = stream.pos();
         }
 
         let mut packets = RawPacketStream::new(stream);
@@ -61,7 +61,7 @@ impl DemoFile {
                     self.handler
                         .handle_packet(packet.clone())
                         .context(format!("could not handle packet {:?}", packet))?;
-                    self.handled_bits = packets.pos();
+                    self.bytes_offset = packets.pos();
                 }
                 Ok(None) => break,
                 Err(tf_demo_parser::ParseError::ReadError(BitError::NotEnoughData { requested, bits_left })) => {
@@ -78,7 +78,15 @@ impl DemoFile {
             }
         }
 
+        let handled_byte_count = self.bytes_offset / 8;
+        self.bytes = self.bytes.iter().skip(handled_byte_count).copied().collect();
+        self.bytes_offset -= handled_byte_count * 8;
+
         Ok(())
+    }
+
+    pub fn add_bytes(&mut self, bytes: Vec<u8>) {
+        self.bytes.extend(bytes);
     }
 }
 
@@ -88,9 +96,12 @@ struct DemoFileManager {
 }
 
 impl DemoFileManager {
-    pub fn demo_at_path(&mut self, path: &Path, analyzer_algorithms: Vec<Box<dyn CheatAlgorithm + Send>>) -> &mut DemoFile {
+    pub fn demo_at_path<A>(&mut self, path: &Path, algorithm_getter: &mut A) -> &mut DemoFile
+    where
+        A: FnMut() -> Vec<Box<dyn CheatAlgorithm + Send>>,
+    {
         if !self.demos.contains_key(path) {
-            let new_handler = CheatDemoHandler::with_analyser(CheatAnalyser::new(analyzer_algorithms));
+            let new_handler = CheatDemoHandler::with_analyser(CheatAnalyser::new(algorithm_getter()));
             let demo_file = DemoFile::new(new_handler);
             self.demos.insert(path.to_path_buf(), demo_file);
         }
@@ -108,7 +119,7 @@ impl DemoFileManager {
             _ => return Ok(()),
         }
 
-        let demo_file = self.demo_at_path(&path, algorithm_getter());
+        let demo_file = self.demo_at_path(&path, algorithm_getter);
 
         let file_length = {
             let meta = std::fs::metadata(&path).context(format!("could not aquire metadata for file {:?}", path))?;
@@ -132,7 +143,7 @@ impl DemoFileManager {
             demo_file.read_size += byte_count_read;
             buffer
         };
-        demo_file.bytes.extend(bytes_new);
+        demo_file.add_bytes(bytes_new);
 
         let ret_val = demo_file.process_next_chunk();
 
@@ -188,14 +199,14 @@ impl DemoFileManager {
     }
 }
 
-pub fn live_analysis<A>(demo_path: PathBuf, mut algorithm_getter: A) -> anyhow::Result<Vec<CheatAnalyser>>
+pub fn live_analysis<A>(demo_path: PathBuf, mut algorithm_getter: A) -> anyhow::Result<Vec<(PathBuf, CheatAnalyser)>>
 where
     A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
 {
     let mut demos = DemoFileManager::default();
 
     let (tx, rx) = std::sync::mpsc::channel();
-    let config = notify::Config::default().with_poll_interval(Duration::from_secs_f32(3.0));
+    let config = notify::Config::default().with_poll_interval(Duration::from_secs_f32(1.0));
     let mut watcher: RecommendedWatcher = Watcher::new(tx, config).context("could not construct watcher")?;
     watcher
         .watch(&demo_path, notify::RecursiveMode::Recursive)
@@ -209,8 +220,7 @@ where
             .for_each(|e| tracing::error!("{:?}", e));
     }
 
-    // TODO: return cheat analyzers
-    Ok(vec![])
+    Ok(demos.demos.into_iter().map(|(path, demo)| (path, demo.handler.analyser)).collect())
 }
 
 pub fn get_player_name(state: &CheatAnalyserState, steam_id: u64) -> Option<&str> {
