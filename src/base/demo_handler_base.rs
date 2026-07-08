@@ -18,7 +18,7 @@ use tf_demo_parser::demo::header::Header;
 pub struct CheatDemoHandler<T: MessageHandler> {
     pub server_tick: ServerTick,
     pub demo_tick: DemoTick,
-    pub string_table_names: Vec<String>,
+    pub string_table_names: Vec<Box<str>>,
     pub analyser: T,
     pub state_handler: ParserState,
 }
@@ -102,7 +102,7 @@ impl<'a, T: MessageHandler> CheatDemoHandler<T> {
             self.analyser.handle_string_entry(&table.name, entry_index, &entry, &self.state_handler);
         }
 
-        self.string_table_names.push(table.name.to_string());
+        self.string_table_names.push(table.name.into());
     }
 
     fn handle_table_update(&mut self, table_id: u8, entries: Vec<(u16, StringTableEntry<'a>)>) {
