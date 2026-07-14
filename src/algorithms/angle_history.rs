@@ -14,7 +14,6 @@ use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
-#[derive(Default)]
 pub struct AngleHistory {
     ticks: Vec<HashMap<u64, Player>>,
 
@@ -23,21 +22,23 @@ pub struct AngleHistory {
     detections: Vec<Detection>,
 }
 
-impl AngleHistory {
-    pub fn new() -> Self {
+impl Default for AngleHistory {
+    fn default() -> Self {
         Self {
+            ticks: Vec::new(),
+            jg: Default::default(),
             params: HashMap::from([
                 ("tick_window".to_string(), Parameter::Int(4)),
                 ("max_delta_first_third".to_string(), Parameter::Float(0.5)),
                 ("min_delta_second_third".to_string(), Parameter::Float(10.0)),
             ]),
-            ..Default::default()
+            detections: Vec::new(),
         }
     }
 }
 
 impl CheatAlgorithm for AngleHistory {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
@@ -77,7 +78,10 @@ impl CheatAlgorithm for AngleHistory {
                 continue;
             }
 
-            self.ticks.get_mut(0).context("no first tick in AngleHistory")?.insert(steam_id, player.clone());
+            self.ticks
+                .get_mut(0)
+                .expect("the first tick was inserted earlier this function and must exist")
+                .insert(steam_id, player.clone());
 
             let current_angle = (player.view_angle, player.pitch_angle);
 

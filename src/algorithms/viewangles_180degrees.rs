@@ -44,7 +44,7 @@ impl Default for ViewAngles180Degrees {
 impl CheatAlgorithm for ViewAngles180Degrees {
     // REQUIRED: Should this algorithm run by default if -a isn't specified?
     // Generally should be true, unless you're doing dev-only stuff (writing to files, printing debug output, etc).
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 

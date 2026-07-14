@@ -57,7 +57,7 @@ impl Gui {
         }
         let (send, recv) = std::sync::mpsc::channel();
         Self {
-            algos: HashMap::from_iter(get_algorithms().iter().map(|a| (a.algorithm_name().to_string(), a.default()))),
+            algos: HashMap::from_iter(get_algorithms().iter().map(|a| (a.algorithm_name().to_string(), a.enabled_by_default()))),
             params,
             file: None,
             processing: false,

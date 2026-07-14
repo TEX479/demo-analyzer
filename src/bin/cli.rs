@@ -1,10 +1,9 @@
 use analysis_template::{
-    dev_print,
+    SILENT, dev_print,
     lib::{
-        algorithm::{analyse, get_algorithms, CheatAlgorithm},
+        algorithm::{CheatAlgorithm, analyse, get_algorithms},
         parameters::Parameters,
     },
-    SILENT,
 };
 use std::{
     collections::HashMap,
@@ -23,25 +22,17 @@ fn main() -> Result<(), Error> {
 
     let mut opts = Options::new();
     opts.optopt("i", "input", "set input file path", "PATH");
-    opts.optflag(
-        "q",
-        "quiet",
-        "silence all output except for the final JSON string",
+    opts.optflag("q", "quiet", "silence all output except for the final JSON string");
+    opts.optflag("Q", "quiet-pretty", "same as -q, but with more human-readable json");
+    opts.optmulti(
+        "a",
+        "algorithm",
+        "specify the algorithm to run. Include multiple -a flags to run multiple algorithms. If not specified, the default algorithms are run.",
+        "ALGORITHM [-a ALGORITHM]...",
     );
-    opts.optflag(
-        "Q",
-        "quiet-pretty",
-        "same as -q, but with more human-readable json",
-    );
-    opts.optmulti("a", "algorithm", "specify the algorithm to run. Include multiple -a flags to run multiple algorithms. If not specified, the default algorithms are run.", "ALGORITHM [-a ALGORITHM]...");
     opts.optflag("c", "count", "only print the number of detections");
     opts.optflag("h", "help", "print this help menu");
-    opts.optopt(
-        "p",
-        "params",
-        "Parameter json file to use for the algorithms",
-        "PATH",
-    );
+    opts.optopt("p", "params", "Parameter json file to use for the algorithms", "PATH");
 
     fn print_help(opts: &getopts::Options) {
         println!("{}", opts.usage("Usage: analysis-template [options]"));
@@ -70,7 +61,7 @@ fn main() -> Result<(), Error> {
     let mut algorithms: Vec<Box<dyn CheatAlgorithm + Send>> = get_algorithms();
     let specified_algorithms = matches.opt_strs("a");
     if specified_algorithms.is_empty() && !matches.opt_present("a") {
-        algorithms.retain(|a| a.default());
+        algorithms.retain(|a| a.enabled_by_default());
     } else {
         algorithms.retain(|a| specified_algorithms.contains(&a.algorithm_name().to_string()));
     }
@@ -78,8 +69,7 @@ fn main() -> Result<(), Error> {
     if let Some(param_file_path) = matches.opt_str("p") {
         dev_print!("Loading parameters from {}:", param_file_path);
         let c = fs::read(param_file_path).expect("Couldn't read parameter file");
-        let config = serde_json::from_slice::<HashMap<String, Parameters>>(&c)
-            .expect("Couldn't decode parameter file");
+        let config = serde_json::from_slice::<HashMap<String, Parameters>>(&c).expect("Couldn't decode parameter file");
         for algo in algorithms.iter_mut() {
             let algorithm_name: String = algo.algorithm_name().to_owned();
 
@@ -109,10 +99,7 @@ fn main() -> Result<(), Error> {
         .filter(|a| algorithms.iter().all(|b| b.algorithm_name() != *a))
         .collect();
     if !unknown_algorithms.is_empty() {
-        panic!(
-            "Unknown algorithms specified: {}",
-            unknown_algorithms.join(", ")
-        );
+        panic!("Unknown algorithms specified: {}", unknown_algorithms.join(", "));
     } else if algorithms.is_empty() {
         panic!("No algorithms specified");
     }

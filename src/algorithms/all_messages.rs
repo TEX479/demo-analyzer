@@ -49,7 +49,7 @@ impl Default for AllMessages {
 }
 
 impl CheatAlgorithm for AllMessages {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         false
     }
 

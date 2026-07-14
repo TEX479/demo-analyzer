@@ -37,7 +37,7 @@ impl AimSnap {
 }
 
 impl CheatAlgorithm for AimSnap {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 

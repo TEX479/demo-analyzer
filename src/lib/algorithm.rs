@@ -10,7 +10,7 @@ pub use crate::algorithms::{
     write_to_file::WriteToFile,
 };
 
-use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
+use crate::{algorithms::tex::angle_acceleration::AngleAccelerationAnalyzer, base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
 use anyhow::Error;
 use bitbuffer::BitRead;
 use serde::{Deserialize, Serialize};
@@ -36,10 +36,11 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(WriteToFile::new().expect("could not get new WriteToFile algorithm")),
         Box::new(OOBPitch::new()),
         Box::new(AngleRepeat::new()),
-        Box::new(AngleHistory::new()),
+        Box::new(AngleHistory::default()),
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
+        Box::new(AngleAccelerationAnalyzer::default()),
     ]
 }
 
@@ -72,7 +73,7 @@ pub fn analyse(demo: &Demo, algorithms: Vec<Box<dyn CheatAlgorithm + Send>>) -> 
 }
 
 pub trait CheatAlgorithm {
-    fn default(&self) -> bool;
+    fn enabled_by_default(&self) -> bool;
 
     fn algorithm_name(&self) -> &str;
 
@@ -119,7 +120,7 @@ pub trait CheatAlgorithm {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Detection {
     pub tick: u32,
     pub algorithm: String,

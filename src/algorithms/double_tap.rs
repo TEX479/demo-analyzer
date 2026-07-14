@@ -38,7 +38,7 @@ fn is_cleaver_or_wrap_assassin(weapon_id: u32, damage: u32) -> bool {
 }
 
 impl CheatAlgorithm for DoubleTap {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 

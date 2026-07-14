@@ -58,7 +58,7 @@ impl WriteToFile {
 
 // lifetimes not needed for this algorithm, but is included to serve as an example of how to handle them.
 impl CheatAlgorithm for WriteToFile {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         false
     }
 

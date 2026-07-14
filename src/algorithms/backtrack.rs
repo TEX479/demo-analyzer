@@ -40,7 +40,7 @@ fn is_backstab(damage: u16, is_crit: bool, weapon_id: u16, victim_health: u16) -
 }
 
 impl CheatAlgorithm for BackTrack {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 

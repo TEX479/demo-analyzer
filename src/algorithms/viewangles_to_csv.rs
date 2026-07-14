@@ -81,7 +81,7 @@ impl Default for ViewAnglesToCSV {
 }
 
 impl CheatAlgorithm for ViewAnglesToCSV {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         false
     }
 

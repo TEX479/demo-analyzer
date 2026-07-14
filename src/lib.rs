@@ -14,6 +14,9 @@ pub mod algorithms {
     pub mod viewangles_180degrees;
     pub mod viewangles_to_csv;
     pub mod write_to_file;
+    pub mod tex {
+        pub mod angle_acceleration;
+    }
     pub mod nocrex {
         pub mod aimsnap;
         pub mod angle_repeat;

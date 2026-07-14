@@ -38,7 +38,7 @@ impl AngleRepeat {
 }
 
 impl CheatAlgorithm for AngleRepeat {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 

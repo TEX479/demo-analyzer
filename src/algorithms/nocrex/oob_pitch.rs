@@ -40,7 +40,7 @@ impl Default for OOBPitch {
 }
 
 impl CheatAlgorithm for OOBPitch {
-    fn default(&self) -> bool {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 

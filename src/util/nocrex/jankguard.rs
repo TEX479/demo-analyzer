@@ -9,7 +9,7 @@ use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 
 const TELEPORT_DIST: f32 = 256.0;
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 struct PlayerData {
     pub last_spawn: u32,
     pub last_teleport: u32,
@@ -18,7 +18,7 @@ struct PlayerData {
     pub prev_state: Option<Player>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct JankGuard {
     player_data: HashMap<u64, PlayerData>,
 }
