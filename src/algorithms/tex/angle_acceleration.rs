@@ -1,6 +1,9 @@
 use crate::{
     base::cheat_analyser_base::{Player, PlayerState},
-    lib::algorithm::{CheatAlgorithm, Detection},
+    lib::{
+        algorithm::{CheatAlgorithm, Detection},
+        parameters::{Parameter, Parameters},
+    },
     util::nocrex::jankguard::JankGuard,
 };
 use anyhow::Context;
@@ -11,16 +14,32 @@ use std::{
 };
 use steamid_ng::SteamID;
 
-// static TICK_WINDOW: usize = 5;
-// static EXPECTED_PLAYER_COUNT: usize = 24;
-static ACCELERATION_THRESHOLD: f32 = 5.0;
+static PARAMETER_THRESHOLD: &str = "threshold";
+static PARAMETER_MAX_FIRE_DELAY: &str = "max_fire_delay";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AngleAccelerationAnalyzer {
     angle_history: HashMap<u64, PreviousAngles>,
     // ticks: VecDeque<HashMap<u64, Player>>,
+    parameters: Parameters,
+
     jg: JankGuard,
     detections: Vec<Detection>,
+}
+
+impl Default for AngleAccelerationAnalyzer {
+    fn default() -> Self {
+        Self {
+            angle_history: Default::default(),
+            parameters: Parameters::from([
+                // TODO: fine tune the default params
+                (PARAMETER_THRESHOLD.to_string(), Parameter::Float(5.0)),
+                (PARAMETER_MAX_FIRE_DELAY.into(), Parameter::Int(1)),
+            ]),
+            jg: Default::default(),
+            detections: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -103,7 +122,7 @@ impl Neg for Angle {
         let Self { yaw, pitch } = self;
         let yaw = yaw - 180.0;
         let pitch = pitch - 180.0;
-        Self { yaw, pitch }.normalized()
+        Self { yaw, pitch }
     }
 }
 impl Add for Angle {
@@ -119,7 +138,11 @@ impl Add for Angle {
 impl Sub for Angle {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
-        self.add(rhs.neg())
+        Self {
+            yaw: self.yaw - rhs.yaw,
+            pitch: self.pitch - rhs.pitch,
+        }
+        .normalized()
     }
 }
 
@@ -132,21 +155,38 @@ impl Angle {
     #[must_use]
     pub fn normalized(self) -> Self {
         let Self { mut yaw, mut pitch } = self;
-        // TODO: verify the angles are values between -180° and +180°
         yaw %= 360.0;
         pitch %= 360.0;
 
+        // normalize angles between +-180°
+        if yaw > 180.0 {
+            yaw -= 360.0;
+        } else if yaw < -180.0 {
+            yaw += 360.0;
+        }
+        if pitch > 180.0 {
+            pitch -= 360.0;
+        } else if pitch < -180.0 {
+            pitch += 360.0;
+        }
+
+        // rotate if
         if pitch > 90.0 {
             pitch = 90.0 - pitch;
-            // TODO: verify the angles are values between -180° and +180°
             yaw += 180.0;
-            yaw %= 360.0;
         } else if pitch < -90.0 {
             pitch = -90.0 - pitch;
-            // TODO: verify the angles are values between -180° and +180°
             yaw += 180.0;
-            yaw %= 360.0;
         }
+
+        // in case yaw was modified renormalize
+        yaw %= 360.0;
+        if yaw > 180.0 {
+            yaw -= 360.0;
+        } else if yaw < -180.0 {
+            yaw += 360.0;
+        }
+
         Self { yaw, pitch }
     }
 
@@ -160,14 +200,14 @@ impl Angle {
 
 impl AngleVelocity {
     pub fn from_angles(previous_tick: Angle, current_tick: Angle) -> Self {
-        let angle = current_tick - previous_tick;
+        let angle = current_tick.rotate_by(previous_tick);
         Self(angle)
     }
 }
 
 impl AngleAcceleration {
     pub fn from_angle_velocities(previous_tick: AngleVelocity, current_tick: AngleVelocity) -> Self {
-        let angle = current_tick.0 - previous_tick.0;
+        let angle = current_tick.0.rotate_by(previous_tick.0);
         Self(angle)
     }
 }
@@ -182,13 +222,43 @@ impl From<AngleAcceleration> for serde_json::Value {
     }
 }
 
+impl AngleAccelerationAnalyzer {
+    pub fn get_parameter_int(&self, parameter_name: &str) -> anyhow::Result<i32> {
+        match self
+            .parameters
+            .get(parameter_name)
+            .context(format!("could not get parameter {:?}", parameter_name))?
+        {
+            Parameter::Int(x) => Ok(*x),
+            parameter => Err(anyhow::Error::msg(format!(
+                "expected parameter {:?} to be of type 'Int', got: {:?}",
+                parameter_name, parameter
+            ))),
+        }
+    }
+
+    pub fn get_parameter_float(&self, parameter_name: &str) -> anyhow::Result<f32> {
+        match self
+            .parameters
+            .get(parameter_name)
+            .context(format!("could not get parameter {:?}", parameter_name))?
+        {
+            Parameter::Float(x) => Ok(*x),
+            parameter => Err(anyhow::Error::msg(format!(
+                "expected parameter {:?} to be of type 'Float', got: {:?}",
+                parameter_name, parameter
+            ))),
+        }
+    }
+}
+
 impl CheatAlgorithm for AngleAccelerationAnalyzer {
     fn enabled_by_default(&self) -> bool {
         true
     }
 
     fn algorithm_name(&self) -> &str {
-        "angle_velocity"
+        "angle_acceleration"
     }
 
     fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
@@ -203,6 +273,13 @@ impl CheatAlgorithm for AngleAccelerationAnalyzer {
         self.jg.on_tick(state).context(format!("jankguard errored in on_tick with state {:?}", state))?;
         let ticknum = u32::from(state.tick);
         let players = &state.players;
+
+        let threshold = self
+            .get_parameter_float(PARAMETER_THRESHOLD)
+            .expect("threshold must exist and be of the correct type");
+        let max_fire_delay = self
+            .get_parameter_int(PARAMETER_MAX_FIRE_DELAY)
+            .expect("max_fire_delay must exist and be of the correct type") as u32;
 
         let mut handled_steam_ids: Vec<u64> = Vec::new();
         let mut detections = Vec::new();
@@ -221,12 +298,21 @@ impl CheatAlgorithm for AngleAccelerationAnalyzer {
 
             let angle_history = self.angle_history.entry(steam_id).or_default();
 
+            // TODO: get some more robust way of filtering out demo jank
+            let reset_angle_history_because_of_jank = self.jg.teleported(&steam_id, ticknum) <= 60 || self.jg.spawned(&steam_id, ticknum) <= 60;
+            if reset_angle_history_because_of_jank {
+                angle_history.reset();
+            }
+
             let angle_new = player.into();
             let Some(angle_acceleration) = angle_history.insert_angle(angle_new) else {
                 continue;
             };
+
             let acceleration_magnitude = angle_acceleration.0.magnitude();
-            if acceleration_magnitude >= ACCELERATION_THRESHOLD {
+            let ticks_since_firing = self.jg.fired(&steam_id, ticknum);
+            let trigger_detection = acceleration_magnitude >= threshold && ticks_since_firing <= max_fire_delay;
+            if trigger_detection {
                 let mut detection_data_map = serde_json::Map::new();
                 detection_data_map.insert("view_angle".into(), angle_new.into());
                 detection_data_map.insert("acceleration".into(), angle_acceleration.into());
@@ -267,6 +353,6 @@ impl CheatAlgorithm for AngleAccelerationAnalyzer {
     }
 
     fn params(&mut self) -> Option<&mut crate::lib::parameters::Parameters> {
-        None
+        Some(&mut self.parameters)
     }
 }
