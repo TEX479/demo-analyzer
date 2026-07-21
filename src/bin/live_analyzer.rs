@@ -64,6 +64,6 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
-        Box::new(AngleAccelerationAnalyzer::default()),
+        // Box::new(AngleAccelerationAnalyzer::default()),
     ]
 }

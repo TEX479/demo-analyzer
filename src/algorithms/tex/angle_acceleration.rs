@@ -33,7 +33,7 @@ impl Default for AngleAccelerationAnalyzer {
             angle_history: Default::default(),
             parameters: Parameters::from([
                 // TODO: fine tune the default params
-                (PARAMETER_THRESHOLD.to_string(), Parameter::Float(5.0)),
+                (PARAMETER_THRESHOLD.to_string(), Parameter::Float(15.0)),
                 (PARAMETER_MAX_FIRE_DELAY.into(), Parameter::Int(1)),
             ]),
             jg: Default::default(),
