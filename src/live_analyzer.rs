@@ -3,7 +3,7 @@ use crate::{
         cheat_analyser_base::{CheatAnalyser, CheatAnalyserState},
         demo_handler_base::CheatDemoHandler,
     },
-    lib::algorithm::CheatAlgorithm,
+    lib::algorithm::{CheatAlgorithm, Detection},
 };
 use anyhow::Context;
 use bitbuffer::{BitError, BitRead, BitReadBuffer, BitReadStream, LittleEndian};
@@ -15,9 +15,9 @@ use std::{
     time::Duration,
 };
 use steamid_ng::SteamID;
-use tf_demo_parser::demo::{header::Header, parser::RawPacketStream};
+use tf_demo_parser::demo::{header::Header, packet::Packet, parser::RawPacketStream};
 
-struct DemoFile {
+pub struct DemoFile {
     pub read_size: u64,
     /// if the file's header has not been parsed yet
     pub handler: CheatDemoHandler<CheatAnalyser>,
@@ -41,6 +41,14 @@ impl DemoFile {
     }
 
     pub fn process_next_chunk(&mut self) -> anyhow::Result<()> {
+        self.process_next_chunk_and_keep_packets(|_| Option::<()>::None)?;
+        Ok(())
+    }
+
+    pub fn process_next_chunk_and_keep_packets<ReturnType, Filter>(&mut self, keep_filter: Filter) -> anyhow::Result<Vec<ReturnType>>
+    where
+        Filter: Fn(&Packet) -> Option<ReturnType>,
+    {
         let buffer = BitReadBuffer::new(&self.bytes, LittleEndian);
         let mut stream = BitReadStream::new(buffer);
         stream
@@ -55,9 +63,13 @@ impl DemoFile {
         }
 
         let mut packets = RawPacketStream::new(stream);
+        let mut kept_packets = Vec::new();
         loop {
             match packets.next(&self.handler.state_handler) {
                 Ok(Some(packet)) => {
+                    if let Some(rt) = keep_filter(&packet) {
+                        kept_packets.push(rt);
+                    }
                     self.handler
                         .handle_packet(packet.clone())
                         .context(format!("could not handle packet {:?}", packet))?;
@@ -82,7 +94,7 @@ impl DemoFile {
         self.bytes = self.bytes.iter().skip(handled_byte_count).copied().collect();
         self.bytes_offset -= handled_byte_count * 8;
 
-        Ok(())
+        Ok(kept_packets)
     }
 
     pub fn add_bytes(&mut self, bytes: Vec<u8>) {
@@ -91,7 +103,7 @@ impl DemoFile {
 }
 
 #[derive(Default)]
-struct DemoFileManager {
+pub struct DemoFileManager {
     demos: HashMap<PathBuf, DemoFile>,
 }
 
@@ -109,14 +121,29 @@ impl DemoFileManager {
         self.demos.get_mut(path).expect("we just inserted that element, it must exist")
     }
 
-    fn handle_event_for_path<A>(&mut self, path: PathBuf, event_kind: notify::EventKind, algorithm_getter: &mut A) -> anyhow::Result<()>
+    // fn handle_event_for_path<A>(&mut self, path: PathBuf, event_kind: notify::EventKind, algorithm_getter: &mut A) -> anyhow::Result<()>
+    // where
+    //     A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
+    // {
+    //     self.handle_event_for_path_and_collect_packets(path, event_kind, algorithm_getter, |_| Option::<()>::None)
+    //         .map(|_| ())
+    // }
+
+    fn handle_event_for_path_and_collect_packets<A, F, R>(
+        &mut self,
+        path: PathBuf,
+        event_kind: notify::EventKind,
+        algorithm_getter: &mut A,
+        filter: F,
+    ) -> anyhow::Result<(Vec<R>, Vec<Detection>)>
     where
-        A: FnMut() -> Vec<Box<dyn CheatAlgorithm + Send>>,
+        A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
+        F: Fn(&Packet) -> Option<R>,
     {
         match event_kind {
             notify::EventKind::Create(_) => {}
             notify::EventKind::Modify(_) => {}
-            _ => return Ok(()),
+            _ => return Ok(Default::default()),
         }
 
         let demo_file = self.demo_at_path(&path, algorithm_getter);
@@ -127,7 +154,7 @@ impl DemoFileManager {
         };
         match file_length.cmp(&demo_file.read_size) {
             std::cmp::Ordering::Greater => {}
-            std::cmp::Ordering::Equal => return Ok(()),
+            std::cmp::Ordering::Equal => return Ok(Default::default()),
             std::cmp::Ordering::Less => {
                 tracing::info!("file shortend. reopening {:?}", path);
                 *demo_file = DemoFile::new(CheatDemoHandler::with_analyser(CheatAnalyser::new(algorithm_getter())));
@@ -145,57 +172,75 @@ impl DemoFileManager {
         };
         demo_file.add_bytes(bytes_new);
 
-        let ret_val = demo_file.process_next_chunk();
+        let ret_val = demo_file.process_next_chunk_and_keep_packets(filter)?;
 
-        // show detections
-        if demo_file.handler.analyser.detections.len() > demo_file.detection_length {
-            demo_file
-                .handler
-                .analyser
-                .detections
-                .iter()
-                .skip(demo_file.detection_length)
-                .for_each(|detection| {
-                    let player_name = match get_player_name(&demo_file.handler.analyser.state, detection.player).map(|s| format!("{s:?}")) {
-                        Some(s) => s,
-                        None => {
-                            tracing::warn!(
-                                "could not get name for player with id {} from state {:?}",
-                                detection.player,
-                                demo_file.handler.analyser.state
-                            );
-                            "???".to_string()
-                        }
-                    };
-                    tracing::warn!(
-                        "detected {} for {} ({}). detecion data: {}",
-                        detection.algorithm,
-                        player_name,
-                        detection.player,
-                        detection.data
-                    );
-                });
+        let detections = if demo_file.handler.analyser.detections.len() > demo_file.detection_length {
+            let detections = demo_file.handler.analyser.detections.iter().skip(demo_file.detection_length).cloned().collect();
             demo_file.detection_length = demo_file.handler.analyser.detections.len();
+            detections
+        } else {
+            Vec::new()
+        };
+
+        if !detections.is_empty() && crate::PRINT_DETECTIONS_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
+            for detection in detections.iter() {
+                let player_string = match get_player_name(&demo_file.handler.analyser.state, detection.player) {
+                    Some(name) => format!("{} ({:?})", detection.player, name),
+                    None => {
+                        tracing::warn!("could not get name for player with id {}", detection.player);
+                        format!("{}", detection.player)
+                    }
+                };
+                tracing::warn!(
+                    "tick: {:06}; player: {};\talgorithm: {}\tdata: {:?}",
+                    detection.tick,
+                    player_string,
+                    detection.algorithm,
+                    detection.data,
+                );
+            }
         }
 
-        ret_val
+        Ok((ret_val, detections))
     }
 
     #[must_use]
     pub fn handle_event<A>(&mut self, event: notify::Event, algorithm_getter: &mut A) -> Vec<anyhow::Error>
     where
-        A: FnMut() -> Vec<Box<dyn CheatAlgorithm + Send>>,
+        A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
     {
-        event
-            .paths
-            .into_iter()
-            .filter(|p| p.extension().is_some_and(|e| e == "dem"))
-            .filter_map(|p| {
-                self.handle_event_for_path(p.clone(), event.kind, algorithm_getter)
-                    .context(format!("error with demo at {:?}", p))
-                    .err()
-            })
-            .collect::<Vec<anyhow::Error>>()
+        match self.handle_event_and_collect_packets(event, algorithm_getter, |_| Option::<()>::None) {
+            Ok(_) => Vec::new(),
+            Err(e) => e,
+        }
+    }
+
+    pub fn handle_event_and_collect_packets<A, F, R>(
+        &mut self,
+        event: notify::Event,
+        algorithm_getter: &mut A,
+        packet_filter: F,
+    ) -> Result<(Vec<R>, Vec<Detection>), Vec<anyhow::Error>>
+    where
+        A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
+        F: Clone + Fn(&Packet) -> Option<R>,
+    {
+        let mut packets = Vec::new();
+        let mut detections = Vec::new();
+        let mut errs = Vec::new();
+        for result in event.paths.into_iter().filter(|p| p.extension().is_some_and(|e| e == "dem")).map(|p| {
+            self.handle_event_for_path_and_collect_packets(p.clone(), event.kind, algorithm_getter, packet_filter.clone())
+                .context(format!("error with demo at {:?}", p))
+        }) {
+            match result {
+                Ok((packets_new, detections_new)) => {
+                    packets.extend(packets_new);
+                    detections.extend(detections_new);
+                }
+                Err(e) => errs.push(e),
+            }
+        }
+        if errs.is_empty() { Ok((packets, detections)) } else { Err(errs) }
     }
 }
 
