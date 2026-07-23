@@ -107,7 +107,7 @@ fn desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(ViewAngles180Degrees::new()),
         Box::new(OOBPitch::new()),
         Box::new(AngleRepeat::new()),
-        Box::new(AngleHistory::new()),
+        Box::new(AngleHistory::default()),
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),

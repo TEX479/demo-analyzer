@@ -8,9 +8,6 @@ pub mod base {
 
 pub mod algorithms {
     pub mod all_messages;
-    pub mod angle_history;
-    pub mod backtrack;
-    pub mod double_tap;
     pub mod viewangles_180degrees;
     pub mod viewangles_to_csv;
     pub mod write_to_file;
@@ -21,6 +18,11 @@ pub mod algorithms {
         pub mod aimsnap;
         pub mod angle_repeat;
         pub mod oob_pitch;
+    }
+    pub mod teltta {
+        pub mod angle_history;
+        pub mod backtrack;
+        pub mod double_tap;
     }
 }
 

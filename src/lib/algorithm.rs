@@ -1,16 +1,23 @@
 // Import algorithm struct here.
 pub use crate::algorithms::{
     all_messages::AllMessages,
-    angle_history::AngleHistory,
-    backtrack::BackTrack,
-    double_tap::DoubleTap,
-    nocrex::{aimsnap::AimSnap, angle_repeat::AngleRepeat, oob_pitch::OOBPitch},
     viewangles_180degrees::ViewAngles180Degrees,
     viewangles_to_csv::ViewAnglesToCSV,
     write_to_file::WriteToFile,
+    nocrex:: {
+        aimsnap::AimSnap, 
+        angle_repeat::AngleRepeat, 
+        oob_pitch::OOBPitch,
+    },
+    teltta:: {
+        angle_history::AngleHistory,
+        backtrack::BackTrack,
+        double_tap::DoubleTap,
+    },
+    tex::angle_acceleration::AngleAccelerationAnalyzer
 };
 
-use crate::{algorithms::tex::angle_acceleration::AngleAccelerationAnalyzer, base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
+use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
 use anyhow::Error;
 use bitbuffer::BitRead;
 use serde::{Deserialize, Serialize};
