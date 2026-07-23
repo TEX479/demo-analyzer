@@ -24,8 +24,9 @@ use tf_demo_parser::demo::packet::datatable::{ParseSendTable, ServerClass, Serve
 use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::MessageHandler;
+use tf_demo_parser::demo::parser::analyser::UserInfo;
 pub use tf_demo_parser::demo::parser::analyser::{Class, Team, UserId};
-use tf_demo_parser::demo::parser::analyser::{Spawn, UserInfo};
+// use tf_demo_parser::demo::parser::analyser::Spawn;
 use tf_demo_parser::demo::parser::handler::BorrowMessageHandler;
 use tf_demo_parser::demo::sendprop::{SendProp, SendPropIdentifier, SendPropValue};
 use tf_demo_parser::demo::vector::{Vector, VectorXY};
@@ -454,6 +455,7 @@ impl MessageHandler for CheatAnalyser {
                 GameEvent::VoteFailed(_) if PRINT_VOTES.load(std::sync::atomic::Ordering::Relaxed) => {
                     tracing::info!("vote failed");
                 }
+                /*
                 GameEvent::PlayerSpawn(player_spawn_event) => {
                     let spawn = Spawn::from_event(player_spawn_event, _tick);
 
@@ -467,7 +469,7 @@ impl MessageHandler for CheatAnalyser {
                     {
                         // tracing::info!("{:?} spawned as {}", user_info.name, spawn.class);
                     }
-                }
+                } // */
                 GameEvent::PlayerChangeClass(class_change_event) => {
                     let class = Class::new(class_change_event.class);
                     if let Some(user_info) = self

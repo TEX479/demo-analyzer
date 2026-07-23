@@ -42,14 +42,14 @@ impl Gui {
                 params.insert(a.algorithm_name().to_string(), a.params().cloned().unwrap());
             }
         }
-        if let Ok(data) = std::fs::read_to_string("params.json") {
-            if let Ok(saved_params) = serde_json::from_str::<HashMap<String, Parameters>>(&data) {
-                for saved_algo in saved_params {
-                    if let Some(algo) = params.get_mut(&saved_algo.0) {
-                        for saved_param in saved_algo.1 {
-                            if let Some(param) = algo.get_mut(saved_param.0.as_str()) {
-                                *param = saved_param.1;
-                            }
+        if let Ok(data) = std::fs::read_to_string("params.json")
+            && let Ok(saved_params) = serde_json::from_str::<HashMap<String, Parameters>>(&data)
+        {
+            for saved_algo in saved_params {
+                if let Some(algo) = params.get_mut(&saved_algo.0) {
+                    for saved_param in saved_algo.1 {
+                        if let Some(param) = algo.get_mut(saved_param.0.as_str()) {
+                            *param = saved_param.1;
                         }
                     }
                 }
@@ -149,7 +149,7 @@ impl eframe::App for Gui {
                         ui.horizontal(|ui| {
                             ui.heading("Parameters");
                             if ui.button("Save").clicked() {
-                                std::fs::write("params.json", &serde_json::to_vec_pretty(&self.params).unwrap()).unwrap();
+                                std::fs::write("params.json", serde_json::to_vec_pretty(&self.params).unwrap()).unwrap();
                             }
                         });
                         ui.separator();
@@ -190,28 +190,27 @@ impl eframe::App for Gui {
             });
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if ui.button("Open...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().add_filter("Demos", &["dem"]).pick_file() {
-                        self.file = Some(path);
-                    }
+                if ui.button("Open...").clicked()
+                    && let Some(path) = rfd::FileDialog::new().add_filter("Demos", &["dem"]).pick_file()
+                {
+                    self.file = Some(path);
                 }
                 ui.add_enabled_ui(self.file.is_some(), |ui| {
                     if ui.button("Analyse").clicked() {
                         self.analyse();
                     }
-                    if ui.button("Save detections").clicked() {
-                        if let Some(a) = &self.analyser {
-                            if let Some(path) = rfd::FileDialog::new().set_file_name("detections.json").save_file() {
-                                let analysis = serde_json::json!({
-                                    "server_ip": a.header.as_ref().map_or("unknown".to_string(), |h| h.server.clone()),
-                                    "duration": a.tick,
-                                    "author": a.header.as_ref().map_or("unknown".to_string(), |h| h.nick.clone()),
-                                    "map": a.header.as_ref().map_or("unknown".to_string(), |h| h.map.clone()),
-                                    "detections": a.detections
-                                });
-                                std::fs::write(path, serde_json::to_vec_pretty(&analysis).unwrap()).unwrap();
-                            }
-                        }
+                    if ui.button("Save detections").clicked()
+                        && let Some(a) = &self.analyser
+                        && let Some(path) = rfd::FileDialog::new().set_file_name("detections.json").save_file()
+                    {
+                        let analysis = serde_json::json!({
+                            "server_ip": a.header.as_ref().map_or("unknown".to_string(), |h| h.server.clone()),
+                            "duration": a.tick,
+                            "author": a.header.as_ref().map_or("unknown".to_string(), |h| h.nick.clone()),
+                            "map": a.header.as_ref().map_or("unknown".to_string(), |h| h.map.clone()),
+                            "detections": a.detections
+                        });
+                        std::fs::write(path, serde_json::to_vec_pretty(&analysis).unwrap()).unwrap();
                     }
                 });
             });

@@ -1,6 +1,7 @@
 use analysis_template::{
-    PRINT_VOTES, SILENT,
-    algorithms::tex::angle_acceleration::AngleAccelerationAnalyzer,
+    PRINT_VOTES,
+    SILENT,
+    // algorithms::tex::angle_acceleration::AngleAccelerationAnalyzer,
     lib::algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, CheatAlgorithm, DoubleTap, OOBPitch, ViewAngles180Degrees},
     live_analyzer::live_analysis,
 };
