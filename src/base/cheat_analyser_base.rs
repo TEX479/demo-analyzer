@@ -457,14 +457,15 @@ impl MessageHandler for CheatAnalyser {
                 GameEvent::PlayerSpawn(player_spawn_event) => {
                     let spawn = Spawn::from_event(player_spawn_event, _tick);
 
-                    if let Some(user_info) = self
+                    if let Some((player, user_info)) = self
                         .state
                         .players
                         .iter()
-                        .filter_map(|p| p.info.as_ref())
-                        .find(|info| info.user_id == spawn.user)
+                        .filter_map(|p| p.info.as_ref().map(|x| (p, x)))
+                        .find(|(_, info)| info.user_id == spawn.user)
+                        && player.class != spawn.class
                     {
-                        tracing::info!("{:?} spawned as {}", user_info.name, spawn.class);
+                        // tracing::info!("{:?} spawned as {}", user_info.name, spawn.class);
                     }
                 }
                 GameEvent::PlayerChangeClass(class_change_event) => {
