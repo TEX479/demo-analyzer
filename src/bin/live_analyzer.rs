@@ -2,11 +2,14 @@ use analysis_template::{
     PRINT_VOTES,
     SILENT,
     // algorithms::tex::angle_acceleration::AngleAccelerationAnalyzer,
-    lib::algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, CheatAlgorithm, DoubleTap, OOBPitch, ViewAngles180Degrees},
+    lib::{
+        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, CheatAlgorithm, DoubleTap, OOBPitch, ViewAngles180Degrees},
+        parameters::Parameter,
+    },
     live_analyzer::live_analysis,
 };
 use anyhow::Context;
-use std::{env::args, path::PathBuf};
+use std::{collections::HashMap, env::args, path::PathBuf};
 use steamlocate::SteamDir;
 use tracing::Level;
 
@@ -57,11 +60,19 @@ fn locate_tf2_folder() -> anyhow::Result<PathBuf> {
 }
 
 fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
+    let mut ah = AngleHistory::default();
+    if let Some(params) = ah.params() {
+        *params = HashMap::from([
+            ("tick_window".to_string(), Parameter::Int(4)),
+            ("max_delta_first_third".to_string(), Parameter::Float(0.45)),
+            ("min_delta_second_third".to_string(), Parameter::Float(4.5)),
+        ]);
+    }
     vec![
         Box::new(ViewAngles180Degrees::new()),
         Box::new(OOBPitch::new()),
         Box::new(AngleRepeat::new()),
-        Box::new(AngleHistory::default()),
+        Box::new(ah),
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
