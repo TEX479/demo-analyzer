@@ -41,13 +41,13 @@ impl DemoFile {
     }
 
     pub fn process_next_chunk(&mut self) -> anyhow::Result<()> {
-        self.process_next_chunk_and_keep_packets(|_| Option::<()>::None)?;
+        self.process_next_chunk_and_keep_packets(|_, _| Option::<()>::None)?;
         Ok(())
     }
 
     pub fn process_next_chunk_and_keep_packets<ReturnType, Filter>(&mut self, keep_filter: Filter) -> anyhow::Result<Vec<ReturnType>>
     where
-        Filter: Fn(&Packet) -> Option<ReturnType>,
+        Filter: Fn(&Packet, &CheatAnalyserState) -> Option<ReturnType>,
     {
         let buffer = BitReadBuffer::new(&self.bytes, LittleEndian);
         let mut stream = BitReadStream::new(buffer);
@@ -67,7 +67,7 @@ impl DemoFile {
         loop {
             match packets.next(&self.handler.state_handler) {
                 Ok(Some(packet)) => {
-                    if let Some(rt) = keep_filter(&packet) {
+                    if let Some(rt) = keep_filter(&packet, &self.handler.analyser.state) {
                         kept_packets.push(rt);
                     }
                     self.handler
@@ -138,7 +138,7 @@ impl DemoFileManager {
     ) -> anyhow::Result<(Vec<R>, Vec<Detection>)>
     where
         A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
-        F: Fn(&Packet) -> Option<R>,
+        F: Fn(&Packet, &CheatAnalyserState) -> Option<R>,
     {
         match event_kind {
             notify::EventKind::Create(_) => {}
@@ -192,7 +192,7 @@ impl DemoFileManager {
                     }
                 };
                 tracing::warn!(
-                    "tick: {:06}; player: {};\talgorithm: {}\tdata: {:?}",
+                    "tick: {:>7}; player: {};\talgorithm: {}\tdata: {}",
                     detection.tick,
                     player_string,
                     detection.algorithm,
@@ -209,7 +209,7 @@ impl DemoFileManager {
     where
         A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
     {
-        match self.handle_event_and_collect_packets(event, algorithm_getter, |_| Option::<()>::None) {
+        match self.handle_event_and_collect_packets(event, algorithm_getter, |_, _| Option::<()>::None) {
             Ok(_) => Vec::new(),
             Err(e) => e,
         }
@@ -223,7 +223,7 @@ impl DemoFileManager {
     ) -> Result<(Vec<R>, Vec<Detection>), Vec<anyhow::Error>>
     where
         A: Fn() -> Vec<Box<dyn CheatAlgorithm + Send>>,
-        F: Clone + Fn(&Packet) -> Option<R>,
+        F: Clone + Fn(&Packet, &CheatAnalyserState) -> Option<R>,
     {
         let mut packets = Vec::new();
         let mut detections = Vec::new();
