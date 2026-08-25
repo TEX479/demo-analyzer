@@ -17,7 +17,7 @@ use crate::lib::parameters::{Parameter, Parameters};
 
 #[derive(Default)]
 pub struct AimSnap {
-    ticks: Vec<(u32, HashMap<u64, Player>)>,
+    ticks: Vec<(u32, HashMap<SteamID, Player>)>,
     jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
@@ -68,7 +68,7 @@ impl CheatAlgorithm for AimSnap {
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
+            let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 

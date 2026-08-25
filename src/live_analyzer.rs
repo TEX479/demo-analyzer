@@ -185,10 +185,10 @@ impl DemoFileManager {
         if !detections.is_empty() && crate::PRINT_DETECTIONS_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
             for detection in detections.iter() {
                 let player_string = match get_player_name(&demo_file.handler.analyser.state, detection.player) {
-                    Some(name) => format!("{} ({:?})", detection.player, name),
+                    Some(name) => format!("{} ({:?})", detection.player.steam3(), name),
                     None => {
-                        tracing::warn!("could not get name for player with id {}", detection.player);
-                        format!("{}", detection.player)
+                        tracing::warn!("could not get name for player with id {}", detection.player.steam3());
+                        detection.player.steam3()
                     }
                 };
                 tracing::warn!(
@@ -268,12 +268,12 @@ where
     Ok(demos.demos.into_iter().map(|(path, demo)| (path, demo.handler.analyser)).collect())
 }
 
-pub fn get_player_name(state: &CheatAnalyserState, steam_id: u64) -> Option<&str> {
+pub fn get_player_name(state: &CheatAnalyserState, steam_id: SteamID) -> Option<&str> {
     state
         .players
         .iter()
         .rev()
         .filter_map(|p| p.info.as_ref())
-        .find(|info| SteamID::from_steam3(&info.steam_id).is_ok_and(|id| u64::from(id) == steam_id))
+        .find(|info| SteamID::from_steam3(&info.steam_id).is_ok_and(|id| id == steam_id))
         .map(|info| info.name.as_str())
 }

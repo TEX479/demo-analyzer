@@ -12,12 +12,13 @@ use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::Message;
+use tf_demo_parser::demo::parser::analyser::UserId;
 
 #[derive(Default)]
 pub struct DoubleTap {
     params: Parameters,
 
-    shots: HashMap<u64, Vec<u32>>,
+    shots: HashMap<SteamID, Vec<u32>>,
 }
 
 impl DoubleTap {
@@ -54,6 +55,7 @@ impl CheatAlgorithm for DoubleTap {
         Ok(vec![tf_demo_parser::MessageType::GameEvent])
     }
 
+    // TODO: refactor this mess
     fn on_message(
         &mut self,
         message: &tf_demo_parser::demo::message::Message,
@@ -87,29 +89,21 @@ impl CheatAlgorithm for DoubleTap {
                 return Ok(vec![]);
             }
 
-            let attacker_uid = u32::from(hurt.attacker);
-            let victim_uid = u32::from(hurt.user_id);
+            let attacker_uid = UserId::from(hurt.attacker);
+            let victim_uid = UserId::from(hurt.user_id);
 
             // get steam id64 from uids
-            let mut attacker_sid = 0;
-            let mut victim_sid = 0;
-            for player in &state.players {
-                if let Some(info) = &player.info {
-                    if u32::from(info.user_id) == attacker_uid {
-                        attacker_sid = u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
-                    } else if u32::from(info.user_id) == victim_uid {
-                        victim_sid = u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
-                    }
-                }
-            }
-            if attacker_sid == 0 || victim_sid == 0 {
-                return Ok(vec![]);
-            }
+            let Some(attacker_sid) = state.get_id64_from_userid(attacker_uid) else {
+                return Ok(Vec::new());
+            };
+            let Some(_victim_sid) = state.get_id64_from_userid(victim_uid) else {
+                return Ok(Vec::new());
+            };
 
             let attacker = match players.iter().find(|x| {
                 x.info
                     .as_ref()
-                    .is_some_and(|info| u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default()) == attacker_sid)
+                    .is_some_and(|info| SteamID::from_steam3(&info.steam_id).unwrap_or_default() == attacker_sid)
             }) {
                 Some(p) => p,
                 None => return Ok(vec![]),
@@ -124,7 +118,7 @@ impl CheatAlgorithm for DoubleTap {
             let past_shot = shots.clone();
 
             shots.clear();
-            shots.extend([ticknum, weapon, victim_uid, dmg]);
+            shots.extend([ticknum, weapon, victim_uid.into(), dmg]);
 
             if past_shot.len() < 2 {
                 return Ok(vec![]);
@@ -140,7 +134,7 @@ impl CheatAlgorithm for DoubleTap {
                 return Ok(vec![]);
             };
 
-            if past_weapon != weapon || past_victim != victim_uid {
+            if past_weapon != weapon || past_victim != u32::from(victim_uid) {
                 return Ok(vec![]);
             }
 
@@ -153,7 +147,7 @@ impl CheatAlgorithm for DoubleTap {
                     ("tick_1", Value::from(past_tick)),
                     ("tick_2", Value::from(ticknum)),
                     ("tick_diff", Value::from(diff)),
-                    ("victim", Value::from(victim_uid)),
+                    ("victim", Value::from(u32::from(victim_uid))),
                     ("weapon_id", Value::from(weapon)),
                     ("damage_1", Value::from(past_dmg)),
                     ("damage_2", Value::from(dmg)),

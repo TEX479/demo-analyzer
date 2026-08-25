@@ -9,6 +9,7 @@ use analysis_template::{
 };
 use eframe::egui;
 use itertools::Itertools;
+use steamid_ng::SteamID;
 use tf_demo_parser::Demo;
 
 fn main() -> eframe::Result {
@@ -24,8 +25,8 @@ struct Gui {
     params: HashMap<String, Parameters>,
     file: Option<std::path::PathBuf>,
     processing: bool,
-    detections: HashMap<u64, Vec<Detection>>,
-    selected_player: Option<u64>,
+    detections: HashMap<SteamID, Vec<Detection>>,
+    selected_player: Option<SteamID>,
     selected_detection: Option<usize>,
 
     analyser: Option<CheatAnalyser>,
@@ -240,14 +241,14 @@ impl eframe::App for Gui {
                         for player in self.detections.iter().sorted_by_key(|d| d.1.len()).rev() {
                             let res = ui.selectable_label(
                                 self.selected_player.is_some_and(|u| u == *player.0),
-                                format!("{} ({})", player.0, player.1.len()),
+                                format!("{} ({})", player.0.steam3(), player.1.len()),
                             );
                             if res.clicked() {
                                 self.selected_player = Some(*player.0);
                                 self.selected_detection = None;
                             }
                             if res.double_clicked() {
-                                let _ = opener::open_browser(format!("https://steamcommunity.com/profiles/{}", player.0));
+                                let _ = opener::open_browser(format!("https://steamcommunity.com/profiles/{}", player.0.steam3()));
                             }
                         }
                     });

@@ -19,7 +19,7 @@ static PARAMETER_MAX_FIRE_DELAY: &str = "max_fire_delay";
 
 #[derive(Debug, Clone)]
 pub struct AngleAccelerationAnalyzer {
-    angle_history: HashMap<u64, PreviousAngles>,
+    angle_history: HashMap<SteamID, PreviousAngles>,
     // ticks: VecDeque<HashMap<u64, Player>>,
     parameters: Parameters,
 
@@ -281,7 +281,7 @@ impl CheatAlgorithm for AngleAccelerationAnalyzer {
             .get_parameter_int(PARAMETER_MAX_FIRE_DELAY)
             .expect("max_fire_delay must exist and be of the correct type") as u32;
 
-        let mut handled_steam_ids: Vec<u64> = Vec::new();
+        let mut handled_steam_ids: Vec<SteamID> = Vec::new();
         let mut detections = Vec::new();
 
         for player in players.iter().filter(|p| p.in_pvs && p.state == PlayerState::Alive) {
@@ -291,7 +291,7 @@ impl CheatAlgorithm for AngleAccelerationAnalyzer {
             if info.steam_id == "BOT" {
                 continue;
             }
-            let Ok(steam_id) = SteamID::from_steam3(&info.steam_id).map(u64::from) else {
+            let Ok(steam_id) = SteamID::from_steam3(&info.steam_id) else {
                 continue;
             };
             handled_steam_ids.push(steam_id);

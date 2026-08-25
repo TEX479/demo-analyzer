@@ -17,7 +17,7 @@ use tf_demo_parser::ParserState;
 
 #[derive(Default)]
 pub struct AngleRepeat {
-    ticks: Vec<(u32, HashMap<u64, Player>)>,
+    ticks: Vec<(u32, HashMap<SteamID, Player>)>,
 
     jg: JankGuard,
     params: Parameters,
@@ -67,7 +67,7 @@ impl CheatAlgorithm for AngleRepeat {
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
+            let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
             let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, p.clone())));
             let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, p.clone())));

@@ -102,7 +102,7 @@ impl CheatAlgorithm for ViewAngles180Degrees {
                 detections.push(Detection {
                     tick: ticknum,
                     algorithm: self.algorithm_name().to_string(),
-                    player: u64::from(SteamID::from_steam3(steam_id).context(format!("invalid steam_id3: {:?}", steam_id))?),
+                    player: SteamID::from_steam3(steam_id).context(format!("invalid steam_id3: {:?}", steam_id))?,
                     data: json!({ "va_delta": va_delta, "pa_delta": pa_delta }),
                 });
             }

@@ -267,7 +267,7 @@ pub struct World {
 pub struct CheatAnalyserState {
     pub players: Vec<Player>,
     pub entid_to_userid: HashMap<EntityId, UserId>,
-    pub userid_to_id64: HashMap<UserId, u64>,
+    pub userid_to_id64: HashMap<UserId, SteamID>,
     pub buildings: BTreeMap<EntityId, Building>,
     pub world: Option<World>,
     // pub kills: Vec<Kill>,
@@ -301,7 +301,7 @@ impl CheatAnalyserState {
         self.entid_to_userid.get(&entid).copied()
     }
 
-    pub fn get_id64_from_userid(&self, userid: UserId) -> Option<u64> {
+    pub fn get_id64_from_userid(&self, userid: UserId) -> Option<SteamID> {
         self.userid_to_id64.get(&userid).copied()
     }
 
@@ -309,7 +309,7 @@ impl CheatAnalyserState {
         self.entid_to_userid.insert(entid, userid);
     }
 
-    pub fn set_userid_to_id64(&mut self, userid: UserId, id64: u64) {
+    pub fn set_userid_to_id64(&mut self, userid: UserId, id64: SteamID) {
         self.userid_to_id64.insert(userid, id64);
     }
 
@@ -415,8 +415,10 @@ impl MessageHandler for CheatAnalyser {
                     self.state.set_entid_to_userid(EntityId::from(event.index as u32), UserId::from(event.user_id));
                     if event.network_id != "BOT".into() {
                         let steamid = SteamID::from_steam3(event.network_id.to_string().as_str());
-                        let steamid64 = u64::from(steamid.unwrap_or(0.into()));
-                        self.state.set_userid_to_id64(event.user_id.into(), steamid64);
+                        match steamid {
+                            Ok(steamid) => self.state.set_userid_to_id64(event.user_id.into(), steamid),
+                            Err(e) => tracing::error!("could not get steamid of player with userid {}:\n{:?}", event.user_id, e),
+                        }
                     }
                 }
                 GameEvent::VoteStarted(e) if PRINT_VOTES.load(std::sync::atomic::Ordering::Relaxed) => {
@@ -612,7 +614,7 @@ impl CheatAnalyser {
     }
 
     pub fn print_detection_summary(&self) {
-        let mut algorithm_counts: HashMap<String, HashMap<u64, usize>> = HashMap::new();
+        let mut algorithm_counts: HashMap<String, HashMap<SteamID, usize>> = HashMap::new();
         for detection in &self.detections {
             let algorithm = detection.algorithm.clone();
             let steamid = detection.player;
@@ -634,7 +636,7 @@ impl CheatAnalyser {
             let mut steamid_counts_vec: Vec<_> = steamid_counts.into_iter().collect();
             steamid_counts_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
             for (steamid, count) in steamid_counts_vec {
-                dev_print!("    {}: {}", steamid, count);
+                dev_print!("    {}: {}", steamid.steam3(), count);
             }
         }
     }
@@ -950,7 +952,7 @@ impl CheatAnalyser {
             let ent_id = user_info.entity_id;
             self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id);
             if let Ok(steam_id) = SteamID::from_steam3(&user_info.player_info.steam_id) {
-                self.state.set_userid_to_id64(user_info.player_info.user_id, steam_id.into())
+                self.state.set_userid_to_id64(user_info.player_info.user_id, steam_id)
             }
             self.state.get_or_create_player(ent_id).info = Some(user_info.into());
         }

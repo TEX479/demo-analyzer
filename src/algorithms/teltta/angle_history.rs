@@ -15,7 +15,7 @@ use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
 pub struct AngleHistory {
-    ticks: Vec<HashMap<u64, Player>>,
+    ticks: Vec<HashMap<SteamID, Player>>,
 
     jg: JankGuard,
     params: Parameters,
@@ -67,7 +67,7 @@ impl CheatAlgorithm for AngleHistory {
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
+            let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 

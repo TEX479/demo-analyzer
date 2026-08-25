@@ -20,19 +20,19 @@ struct PlayerData {
 
 #[derive(Debug, Clone, Default)]
 pub struct JankGuard {
-    player_data: HashMap<u64, PlayerData>,
+    player_data: HashMap<SteamID, PlayerData>,
 }
 
 impl JankGuard {
-    pub fn teleported(&self, player: &u64, tick: u32) -> u32 {
+    pub fn teleported(&self, player: &SteamID, tick: u32) -> u32 {
         tick - self.player_data.get(player).map_or(0, |pd| pd.last_teleport)
     }
 
-    pub fn spawned(&self, player: &u64, tick: u32) -> u32 {
+    pub fn spawned(&self, player: &SteamID, tick: u32) -> u32 {
         tick - self.player_data.get(player).map_or(0, |pd| pd.last_spawn)
     }
 
-    pub fn fired(&self, player: &u64, tick: u32) -> u32 {
+    pub fn fired(&self, player: &SteamID, tick: u32) -> u32 {
         tick - self.player_data.get(player).map_or(0, |pd| pd.last_fire)
     }
 
@@ -103,7 +103,7 @@ impl JankGuard {
                 None => continue,
             };
 
-            let steam_id: u64 = u64::from(SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?);
+            let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
             let player_data = self.player_data.entry(steam_id).or_default();
             let prev_player = player_data.prev_state.as_ref();

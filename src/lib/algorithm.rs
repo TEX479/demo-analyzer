@@ -1,20 +1,12 @@
 // Import algorithm struct here.
 pub use crate::algorithms::{
     all_messages::AllMessages,
+    nocrex::{aimsnap::AimSnap, angle_repeat::AngleRepeat, oob_pitch::OOBPitch},
+    teltta::{angle_history::AngleHistory, backtrack::BackTrack, double_tap::DoubleTap},
+    tex::angle_acceleration::AngleAccelerationAnalyzer,
     viewangles_180degrees::ViewAngles180Degrees,
     viewangles_to_csv::ViewAnglesToCSV,
     write_to_file::WriteToFile,
-    nocrex:: {
-        aimsnap::AimSnap, 
-        angle_repeat::AngleRepeat, 
-        oob_pitch::OOBPitch,
-    },
-    teltta:: {
-        angle_history::AngleHistory,
-        backtrack::BackTrack,
-        double_tap::DoubleTap,
-    },
-    tex::angle_acceleration::AngleAccelerationAnalyzer
 };
 
 use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
@@ -23,6 +15,7 @@ use bitbuffer::BitRead;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use steamid_ng::SteamID;
 use tf_demo_parser::{
     MessageType,
     demo::{data::DemoTick, header::Header, message::Message, parser::RawPacketStream},
@@ -131,6 +124,6 @@ pub trait CheatAlgorithm {
 pub struct Detection {
     pub tick: u32,
     pub algorithm: String,
-    pub player: u64,
+    pub player: SteamID,
     pub data: Value,
 }

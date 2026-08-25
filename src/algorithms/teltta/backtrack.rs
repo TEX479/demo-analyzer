@@ -1,18 +1,17 @@
 // Written by Teltta
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
-
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 
 use anyhow::Error;
-use itertools::any;
 use serde_json::{Map, Value};
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::Message;
+use tf_demo_parser::demo::parser::analyser::UserId;
 
 #[derive(Default)]
 pub struct BackTrack {
@@ -68,8 +67,8 @@ impl CheatAlgorithm for BackTrack {
         if let Message::GameEvent(event_msg) = message
             && let GameEvent::PlayerHurt(hurt) = &event_msg.event
         {
-            let victim_uid = u32::from(hurt.user_id);
-            let attacker_uid = u32::from(hurt.attacker);
+            let victim_uid = UserId::from(hurt.user_id);
+            let attacker_uid = UserId::from(hurt.attacker);
 
             let is_crit = hurt.crit;
 
@@ -81,28 +80,19 @@ impl CheatAlgorithm for BackTrack {
             let max_angle_diff: f32 = get_parameter_value(&self.params, "max_angle_diff")?;
 
             // get steam id64 from uids
-            let mut attacker_sid = 0;
-            let mut victim_sid = 0;
-            for player in &state.players {
-                if let Some(info) = &player.info {
-                    if u32::from(info.user_id) == attacker_uid {
-                        attacker_sid = u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
-                    }
-                    if u32::from(info.user_id) == victim_uid {
-                        victim_sid = u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default());
-                    }
-                }
-            }
-            if any([attacker_sid, victim_sid], |x| x == 0) {
-                return Ok(vec![]);
-            }
+            let Some(attacker_sid) = state.get_id64_from_userid(attacker_uid) else {
+                return Ok(Vec::new());
+            };
+            let Some(victim_sid) = state.get_id64_from_userid(victim_uid) else {
+                return Ok(Vec::new());
+            };
 
             let players = &state.players;
 
             let attacker = match players.iter().find(|x| {
                 x.info
                     .as_ref()
-                    .is_some_and(|info| u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default()) == attacker_sid)
+                    .is_some_and(|info| SteamID::from_steam3(&info.steam_id).unwrap_or_default() == attacker_sid)
             }) {
                 Some(p) => p,
                 None => return Ok(vec![]),
@@ -112,7 +102,7 @@ impl CheatAlgorithm for BackTrack {
             let victim = match players.iter().find(|x| {
                 x.info
                     .as_ref()
-                    .is_some_and(|info| u64::from(SteamID::from_steam3(&info.steam_id).unwrap_or_default()) == victim_sid)
+                    .is_some_and(|info| SteamID::from_steam3(&info.steam_id).unwrap_or_default() == victim_sid)
             }) {
                 Some(p) => p,
                 None => return Ok(vec![]),
