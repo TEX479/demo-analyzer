@@ -3,8 +3,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
-    util::{helpers::viewangle_delta, nocrex::jankguard::JankGuard},
+    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
+    util::{
+        helpers::{ViewAngle, viewangle_delta},
+        nocrex::jankguard::JankGuard,
+    },
 };
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
@@ -17,7 +20,8 @@ use tf_demo_parser::ParserState;
 
 #[derive(Default)]
 pub struct AngleRepeat {
-    ticks: Vec<(u32, HashMap<SteamID, Player>)>,
+    // TODO: replace with custom history struct
+    ticks: Vec<(u32, HashMap<SteamID, ViewAngle>)>,
 
     jg: JankGuard,
     params: Parameters,
@@ -69,8 +73,8 @@ impl CheatAlgorithm for AngleRepeat {
 
             let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
-            let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, p.clone())));
-            let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, p.clone())));
+            let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, *p)));
+            let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, *p)));
 
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
@@ -82,25 +86,14 @@ impl CheatAlgorithm for AngleRepeat {
                 continue;
             }
 
-            let third_angle = (player.view_angle, player.pitch_angle);
+            let third_angle = ViewAngle::from(player);
             self.ticks
                 .get_mut(0)
                 .expect("the first tick was inserted at the start of this function")
                 .1
-                .insert(steam_id, player.clone()); // Store angle for this tick for next ticks
+                .insert(steam_id, third_angle); // Store angle for this tick for next ticks
 
-            if let (Some((second_t, second_data)), Some((first_t, first_data))) = (prev_data, second_prev_data) {
-                let first_angle = (first_data.view_angle, first_data.pitch_angle);
-                let second_angle = (second_data.view_angle, second_data.pitch_angle);
-
-                let calc_real_delta = |t_old: u32, a_old: (f32, f32), t_new: u32, a_new: (f32, f32)| -> f32 {
-                    let tick_delta = t_new.saturating_sub(t_old);
-
-                    let (va_real, pa_real) = viewangle_delta(a_new.0, a_new.1, a_old.0, a_old.1, tick_delta);
-
-                    (va_real * va_real + pa_real * pa_real).sqrt()
-                };
-
+            if let (Some((second_t, second_angle)), Some((first_t, first_angle))) = (prev_data, second_prev_data) {
                 let first_second_delta = calc_real_delta(first_t, first_angle, second_t, second_angle);
                 let first_third_delta = calc_real_delta(first_t, first_angle, ticknum, third_angle);
 
@@ -153,4 +146,12 @@ impl CheatAlgorithm for AngleRepeat {
     fn params(&mut self) -> Option<&mut Parameters> {
         Some(&mut self.params)
     }
+}
+
+fn calc_real_delta(tick_old: u32, angle_old: ViewAngle, tick_new: u32, angle_new: ViewAngle) -> f32 {
+    let tick_delta = tick_new.saturating_sub(tick_old);
+
+    let (va_real, pa_real) = viewangle_delta(angle_new, angle_old, tick_delta);
+
+    (va_real * va_real + pa_real * pa_real).sqrt()
 }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::{
     base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
-    util::{helpers::angle_delta, nocrex::jankguard::JankGuard},
+    util::{helpers::ViewAngle, nocrex::jankguard::JankGuard},
 };
 
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
@@ -15,6 +15,7 @@ use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
 pub struct AngleHistory {
+    // TODO: replace with custom history struct
     ticks: Vec<HashMap<SteamID, Player>>,
 
     jg: JankGuard,
@@ -83,7 +84,7 @@ impl CheatAlgorithm for AngleHistory {
                 .expect("the first tick was inserted earlier this function and must exist")
                 .insert(steam_id, player.clone());
 
-            let current_angle = (player.view_angle, player.pitch_angle);
+            let current_angle = ViewAngle::from(player);
 
             let mut match_index: Option<usize> = None;
             let mut delta_one = 0.0;
@@ -98,8 +99,8 @@ impl CheatAlgorithm for AngleHistory {
                     continue;
                 }
 
-                let past_angle = (past_player.view_angle, past_player.pitch_angle);
-                let delta = angle_delta(current_angle, past_angle);
+                let past_angle = ViewAngle::from(past_player);
+                let delta = current_angle.delta(past_angle);
 
                 if delta < max_delta_first_third {
                     delta_one = delta;
@@ -118,8 +119,8 @@ impl CheatAlgorithm for AngleHistory {
 
                 for m in &mids {
                     if let Some(mid_player) = self.ticks.get(*m).and_then(|map| map.get(&steam_id)) {
-                        let mid_angle = (mid_player.view_angle, mid_player.pitch_angle);
-                        let mid_delta = angle_delta(current_angle, mid_angle);
+                        let mid_angle = ViewAngle::from(mid_player);
+                        let mid_delta = current_angle.delta(mid_angle);
 
                         if mid_delta > min_delta_second_third && self.jg.fired(&steam_id, ticknum) <= (i as u32 + 5) {
                             self.detections.push(Detection {

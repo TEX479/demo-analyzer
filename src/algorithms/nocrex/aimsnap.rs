@@ -3,9 +3,12 @@
 use std::{collections::HashMap, ops::Range};
 
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
+    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
     lib::parameters::get_parameter_value,
-    util::{helpers::viewangle_delta, nocrex::jankguard::JankGuard},
+    util::{
+        helpers::{ViewAngle, viewangle_delta},
+        nocrex::jankguard::JankGuard,
+    },
 };
 use anyhow::{Context, Error};
 use serde_json::json;
@@ -17,7 +20,8 @@ use crate::lib::parameters::{Parameter, Parameters};
 
 #[derive(Default)]
 pub struct AimSnap {
-    ticks: Vec<(u32, HashMap<SteamID, Player>)>,
+    // TODO: replace with custom history struct
+    ticks: Vec<(u32, HashMap<SteamID, ViewAngle>)>,
     jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
@@ -80,14 +84,13 @@ impl CheatAlgorithm for AimSnap {
                 continue;
             }
 
-            self.ticks.get_mut(0).context("no first tick in AimSnap")?.1.insert(steam_id, player.clone()); // Store angle for this tick for next ticks
+            self.ticks
+                .get_mut(0)
+                .context("no first tick in AimSnap")?
+                .1
+                .insert(steam_id, ViewAngle::from(player)); // Store angle for this tick for next ticks
 
-            let angle_history: Vec<_> = self
-                .ticks
-                .iter()
-                .filter_map(|(t, m)| m.get(&steam_id).map(|p| (*t, p.view_angle, p.pitch_angle)))
-                .rev()
-                .collect();
+            let angle_history: Vec<_> = self.ticks.iter().filter_map(|(t, m)| m.get(&steam_id).map(|p| (*t, *p))).rev().collect();
 
             if angle_history.len() < self.ticks.len() {
                 continue;
@@ -95,12 +98,12 @@ impl CheatAlgorithm for AimSnap {
 
             let mut deltas = Vec::new();
             for window in angle_history.windows(2) {
-                let (t1, yaw1, pitch1) = window[0];
-                let (t2, yaw2, pitch2) = window[1];
+                let (t1, angle1) = window[0];
+                let (t2, angle2) = window[1];
 
                 let tick_delta = t2.saturating_sub(t1);
 
-                let (va_delta_real, pa_delta_real) = viewangle_delta(yaw2, pitch2, yaw1, pitch1, tick_delta);
+                let (va_delta_real, pa_delta_real) = viewangle_delta(angle2, angle1, tick_delta);
 
                 let mag_delta = (va_delta_real * va_delta_real + pa_delta_real * pa_delta_real).sqrt();
                 deltas.push(mag_delta);

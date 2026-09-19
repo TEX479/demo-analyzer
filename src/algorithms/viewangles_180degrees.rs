@@ -1,6 +1,6 @@
 use crate::{
     base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
-    util::helpers::viewangle_delta,
+    util::helpers::{ViewAngle, viewangle_delta},
 };
 use anyhow::{Context, Error};
 use serde_json::json;
@@ -15,6 +15,7 @@ use crate::lib::algorithm::{CheatAlgorithm, Detection};
 // Here we want to track the view angle and pitch angle of each player on the previous tick.
 // Later we will compare the previous and current view angles to see if they are 180 degrees apart.
 pub struct ViewAngles180Degrees {
+    // TODO: rewrite so it does not store the entire previous state
     previous: Option<CheatAnalyserState>,
 }
 
@@ -88,9 +89,9 @@ impl CheatAlgorithm for ViewAngles180Degrees {
                     .find(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|i| i.steam_id == *steam_id))
                 {
                     Some(prev_player) => {
-                        let prev_viewangle = prev_player.view_angle;
-                        let prev_pitchangle = prev_player.pitch_angle;
-                        viewangle_delta(player.view_angle, player.pitch_angle, prev_viewangle, prev_pitchangle, tick_delta)
+                        let current_angle = ViewAngle::from(player);
+                        let previous_angle = ViewAngle::from(prev_player);
+                        viewangle_delta(current_angle, previous_angle, tick_delta)
                     }
                     None => (f32::NAN, f32::NAN),
                 }
