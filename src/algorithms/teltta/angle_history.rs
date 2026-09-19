@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
+    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
     util::{helpers::ViewAngle, nocrex::jankguard::JankGuard},
 };
 
@@ -16,7 +16,7 @@ use tf_demo_parser::ParserState;
 
 pub struct AngleHistory {
     // TODO: replace with custom history struct
-    ticks: Vec<HashMap<SteamID, Player>>,
+    ticks: Vec<HashMap<SteamID, ViewAngle>>,
 
     jg: JankGuard,
     params: Parameters,
@@ -82,64 +82,51 @@ impl CheatAlgorithm for AngleHistory {
             self.ticks
                 .get_mut(0)
                 .expect("the first tick was inserted earlier this function and must exist")
-                .insert(steam_id, player.clone());
+                .insert(steam_id, ViewAngle::from(player));
 
             let current_angle = ViewAngle::from(player);
 
-            let mut match_index: Option<usize> = None;
-            let mut delta_one = 0.0;
+            let Some((match_index, delta_one)) = self
+                .ticks
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter_map(|(i, past_instance)| past_instance.get(&steam_id).map(|past_viewangle| (i, current_angle.delta(*past_viewangle))))
+                .find(|(_, delta)| *delta < max_delta_first_third)
+            else {
+                continue;
+            };
 
-            for i in 1..self.ticks.len() {
-                let past_player = match self.ticks.get(i).and_then(|m| m.get(&steam_id)) {
-                    Some(p) => p,
-                    None => continue,
-                };
+            let mid = match_index.div_ceil(2);
+            let mut mids = vec![mid];
 
-                if !(past_player.in_pvs && past_player.state == PlayerState::Alive) {
-                    continue;
-                }
-
-                let past_angle = ViewAngle::from(past_player);
-                let delta = current_angle.delta(past_angle);
-
-                if delta < max_delta_first_third {
-                    delta_one = delta;
-                    match_index = Some(i);
-                    break;
-                }
+            if (match_index - 1) % 2 != 0 {
+                mids.push(mid + 1);
             }
 
-            if let Some(i) = match_index {
-                let mid = i.div_ceil(2);
-                let mut mids = vec![mid];
+            for (m, mid_angle) in mids
+                .iter()
+                .filter_map(|m| self.ticks.get(*m).and_then(|map| map.get(&steam_id)).map(|x| (m, *x)))
+            {
+                let mid_delta = current_angle.delta(mid_angle);
 
-                if (i - 1) % 2 != 0 {
-                    mids.push(mid + 1);
-                }
-
-                for m in &mids {
-                    if let Some(mid_player) = self.ticks.get(*m).and_then(|map| map.get(&steam_id)) {
-                        let mid_angle = ViewAngle::from(mid_player);
-                        let mid_delta = current_angle.delta(mid_angle);
-
-                        if mid_delta > min_delta_second_third && self.jg.fired(&steam_id, ticknum) <= (i as u32 + 5) {
-                            self.detections.push(Detection {
-                                tick: ticknum,
-                                algorithm: self.algorithm_name().to_string(),
-                                player: steam_id,
-                                data: json!({
-                                    "angle_current": current_angle,
-                                    "angle_middle": (mid_player.view_angle, mid_player.pitch_angle),
-                                    "angle_trigger": (player.view_angle, player.pitch_angle),
-                                    "delta_1_3": delta_one,
-                                    "delta_2_3": mid_delta,
-                                    "match_index": i,
-                                    "middle_indices": mids,
-                                    "middle_trigger": m,
-                                }),
-                            });
-                        }
-                    }
+                if mid_delta > min_delta_second_third && self.jg.fired(&steam_id, ticknum) <= (match_index as u32 + 5) {
+                    self.detections.push(Detection {
+                        tick: ticknum,
+                        algorithm: self.algorithm_name().to_string(),
+                        player: steam_id,
+                        data: json!({
+                            // TODO: check why there is the same angle twice
+                            "angle_current": current_angle,
+                            "angle_middle": mid_angle,
+                            "angle_trigger": current_angle,
+                            "delta_1_3": delta_one,
+                            "delta_2_3": mid_delta,
+                            "match_index": match_index,
+                            "middle_indices": mids,
+                            "middle_trigger": m,
+                        }),
+                    });
                 }
             }
         }

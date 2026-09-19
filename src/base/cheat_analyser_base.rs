@@ -323,6 +323,7 @@ impl CheatAnalyserState {
 }
 
 // ParserState requires a non-self impl of does_handle so I had to create this.
+// TODO: check if a lazy_static mutex is really necessary, or if this can actually be moved into the `CheatAnalyser`
 lazy_static! {
     static ref HANDLED_MESSAGE_TYPES: Mutex<Vec<MessageType>> = Mutex::new(vec![MessageType::PacketEntities, MessageType::GameEvent, MessageType::NetTick]);
 }
@@ -374,7 +375,7 @@ impl MessageHandler for CheatAnalyser {
                 }
             }
             Message::NetTick(_) => {
-                // TODO: figure out something that works for live analzing
+                // TODO: figure out something that works for live analysis
                 self.check_progress();
                 for algorithm in &mut self.algorithms {
                     if let Ok(detections) = algorithm.on_tick(&self.state, parser_state) {
@@ -667,8 +668,8 @@ impl CheatAnalyser {
         }
 
         let tps = if self.progress.len() >= 2 {
-            let first_tick = self.progress.first().expect("CheatAnalyser has to have a first element in `progress` field");
-            let last_tick = self.progress.last().expect("CheatAnalyser has to have a last element in `progress` field");
+            let first_tick = self.progress.first().copied().unwrap_or(0);
+            let last_tick = self.progress.last().copied().unwrap_or(tick);
             let tps = (last_tick - first_tick) as f64 / (self.progress.len() as f64 - 1.0);
             tps * PROGRESS_UPDATE_INTERVAL_MS as f64 / 1000.0
         } else {
