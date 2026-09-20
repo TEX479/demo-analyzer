@@ -1,7 +1,7 @@
 // Put individual functions with widespread utility in here.
 // For more complicated structures, consider making your own file in the /util directory.
 
-use crate::base::cheat_analyser_base::Player;
+use crate::base::cheat_analyser_base::{Player, PlayerState};
 use serde::{Deserialize, Serialize};
 use tf_demo_parser::demo::message::packetentities::EntityId;
 
@@ -60,4 +60,12 @@ impl From<&Player> for ViewAngle {
             pitch: value.pitch_angle,
         }
     }
+}
+
+pub fn valid_players<'a>(
+    players: impl Iterator<Item = &'a Player>,
+) -> impl Iterator<Item = (&'a Player, &'a tf_demo_parser::demo::parser::analyser::UserInfo)> {
+    players
+        .filter(|p| p.in_pvs && p.state == PlayerState::Alive)
+        .filter_map(|p| p.info.as_ref().map(|i| (p, i)).filter(|(_, i)| i.steam_id != "BOT"))
 }

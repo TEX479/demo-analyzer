@@ -89,6 +89,7 @@ impl CheatAlgorithm for BackTrack {
 
             let players = &state.players;
 
+            // TODO: use `crate::util::helper::valid_players`
             let attacker = match players.iter().find(|x| {
                 x.info
                     .as_ref()
@@ -99,6 +100,7 @@ impl CheatAlgorithm for BackTrack {
             };
             let attacker_pos = attacker.position;
 
+            // TODO: use `crate::util::helper::valid_players`
             let victim = match players.iter().find(|x| {
                 x.info
                     .as_ref()

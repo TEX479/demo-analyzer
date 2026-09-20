@@ -1,16 +1,18 @@
 // Written by Nocrex
 
-use std::collections::{HashMap, HashSet};
-
-use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
-
+use crate::{
+    base::cheat_analyser_base::CheatAnalyserState,
+    lib::{
+        algorithm::{CheatAlgorithm, Detection},
+        parameters::{Parameter, Parameters, get_parameter_value},
+    },
+    util::helpers::valid_players,
+};
 use anyhow::{Context, Error};
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use steamid_ng::SteamID;
 use tf_demo_parser::{ParserState, demo::message::Message};
-
-use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 
 pub struct OOBPitch {
     last_detections: HashSet<String>,
@@ -69,7 +71,6 @@ impl CheatAlgorithm for OOBPitch {
 
         if let Message::NetTick(_) = message {
             let ticknum = u32::from(state.tick);
-            let players = &state.players;
 
             let mut detections = HashSet::new();
 
@@ -78,15 +79,7 @@ impl CheatAlgorithm for OOBPitch {
 
             let is_valve_server = self.server_name.starts_with("Valve Matchmaking Server");
 
-            for player in players
-                .iter()
-                .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
-            {
-                let info = match &player.info {
-                    Some(info) => info,
-                    None => continue,
-                };
-
+            for (player, info) in valid_players(state.players.iter()) {
                 let steam_id = &info.steam_id;
 
                 if !(min_pitch..=max_pitch).contains(&player.pitch_angle) {

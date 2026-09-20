@@ -98,6 +98,7 @@ impl CheatAlgorithm for DoubleTap {
                 return Ok(Vec::new());
             };
 
+            // maybe use `crate::util::helper::valid_players`, if `assert_pvs` option can be allowed to always be true
             let Some(attacker) = players.iter().find(|x| {
                 x.info
                     .as_ref()

@@ -1,22 +1,21 @@
 // Written by Nocrex, Patched for Command Batching by Ciam
 
-use std::{collections::HashMap, ops::Range};
-
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
-    lib::parameters::get_parameter_value,
+    base::cheat_analyser_base::CheatAnalyserState,
+    lib::{
+        algorithm::{CheatAlgorithm, Detection},
+        parameters::{Parameter, Parameters, get_parameter_value},
+    },
     util::{
-        helpers::{ViewAngle, viewangle_delta},
+        helpers::{ViewAngle, valid_players, viewangle_delta},
         nocrex::jankguard::JankGuard,
     },
 };
 use anyhow::{Context, Error};
 use serde_json::json;
+use std::{collections::HashMap, ops::Range};
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
-
-use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters};
 
 #[derive(Default)]
 pub struct AimSnap {
@@ -63,15 +62,7 @@ impl CheatAlgorithm for AimSnap {
         self.ticks.insert(0, (ticknum, HashMap::new()));
         self.ticks.truncate(5);
 
-        for player in players
-            .iter()
-            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
-        {
-            let info = match &player.info {
-                Some(info) => info,
-                None => continue,
-            };
-
+        for (player, info) in valid_players(players.iter()) {
             let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));

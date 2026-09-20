@@ -1,11 +1,14 @@
 // Written by Teltta
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
+    base::cheat_analyser_base::CheatAnalyserState,
     lib::{
         algorithm::{CheatAlgorithm, Detection},
         parameters::{Parameter, Parameters, get_parameter_value},
     },
-    util::{helpers::ViewAngle, nocrex::jankguard::JankGuard},
+    util::{
+        helpers::{ViewAngle, valid_players},
+        nocrex::jankguard::JankGuard,
+    },
 };
 use anyhow::{Context, Error};
 use serde_json::json;
@@ -58,15 +61,7 @@ impl CheatAlgorithm for AngleHistory {
         self.ticks.insert(0, HashMap::new());
         self.ticks.truncate(tick_window as usize);
 
-        for player in players
-            .iter()
-            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
-        {
-            let info = match &player.info {
-                Some(info) => info,
-                None => continue,
-            };
-
+        for (player, info) in valid_players(players.iter()) {
             let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));

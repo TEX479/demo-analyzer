@@ -1,6 +1,6 @@
 use crate::{
     base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
-    util::helpers::{ViewAngle, viewangle_delta},
+    util::helpers::{ViewAngle, valid_players, viewangle_delta},
 };
 use anyhow::{Context, Error};
 use serde_json::json;
@@ -64,15 +64,7 @@ impl CheatAlgorithm for ViewAngles180Degrees {
         // - In PVS (data is being sent to the client)
         // - Alive (you can't cheat if you're dead)
         // - Not a tf_bot (you can't convict a tf_bot)
-        for player in players
-            .iter()
-            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
-        {
-            let info = match &player.info {
-                Some(info) => info,
-                None => continue,
-            };
-
+        for (player, info) in valid_players(players.iter()) {
             let steam_id = &info.steam_id;
             let tick_delta = {
                 if ticknum == 0 {

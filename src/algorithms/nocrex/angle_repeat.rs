@@ -1,20 +1,19 @@
 // Written by Nocrex, Patched for Command Batching by Ciam
 
-use std::collections::HashMap;
-
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
+    base::cheat_analyser_base::CheatAnalyserState,
+    lib::{
+        algorithm::{CheatAlgorithm, Detection},
+        parameters::{Parameter, Parameters, get_parameter_value},
+    },
     util::{
-        helpers::{ViewAngle, viewangle_delta},
+        helpers::{ViewAngle, valid_players, viewangle_delta},
         nocrex::jankguard::JankGuard,
     },
 };
-
-use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-
 use anyhow::{Context, Error};
 use serde_json::json;
+use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
@@ -62,15 +61,7 @@ impl CheatAlgorithm for AngleRepeat {
         let min_first_second_angle_delta: f32 = get_parameter_value(&self.params, "min_first_second_angle_delta")?;
         let max_first_third_angle_delta: f32 = get_parameter_value(&self.params, "max_first_third_angle_delta")?;
 
-        for player in players
-            .iter()
-            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
-        {
-            let info = match &player.info {
-                Some(info) => info,
-                None => continue,
-            };
-
+        for (player, info) in valid_players(players.iter()) {
             let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
 
             let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, *p)));
