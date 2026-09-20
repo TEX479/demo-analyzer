@@ -7,7 +7,7 @@ use crate::{
         parameters::{Parameter, Parameters, get_parameter_value},
     },
     util::{
-        helpers::{ViewAngle, valid_players, viewangle_delta},
+        helpers::{KeyValueVec, ViewAngle, valid_players, viewangle_delta},
         nocrex::jankguard::JankGuard,
     },
 };
@@ -20,7 +20,7 @@ use tf_demo_parser::ParserState;
 #[derive(Default)]
 pub struct AngleRepeat {
     // TODO: replace with custom history struct
-    ticks: Vec<(u32, HashMap<SteamID, ViewAngle>)>,
+    ticks: Vec<(u32, KeyValueVec<SteamID, ViewAngle>)>,
 
     jg: JankGuard,
     params: Parameters,
@@ -54,7 +54,7 @@ impl CheatAlgorithm for AngleRepeat {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
-        self.ticks.insert(0, (ticknum, HashMap::new()));
+        self.ticks.insert(0, (ticknum, KeyValueVec::default()));
         self.ticks.truncate(3);
 
         let min_angle_diff_ratio: f32 = get_parameter_value(&self.params, "min_angle_diff_ratio")?;
@@ -62,8 +62,8 @@ impl CheatAlgorithm for AngleRepeat {
         let max_first_third_angle_delta: f32 = get_parameter_value(&self.params, "max_first_third_angle_delta")?;
 
         for (player, _info, steam_id) in valid_players(players.iter()) {
-            let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, *p)));
-            let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, *p)));
+            let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|a| (*t, *a)));
+            let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|a| (*t, *a)));
 
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
@@ -76,11 +76,12 @@ impl CheatAlgorithm for AngleRepeat {
             }
 
             let third_angle = ViewAngle::from(player);
-            self.ticks
+            _ = self
+                .ticks
                 .get_mut(0)
                 .expect("the first tick was inserted at the start of this function")
                 .1
-                .insert(steam_id, third_angle); // Store angle for this tick for next ticks
+                .insert(steam_id, third_angle); // Store angle of this tick for next ticks
 
             if let (Some((second_t, second_angle)), Some((first_t, first_angle))) = (prev_data, second_prev_data) {
                 let first_second_delta = calc_real_delta(first_t, first_angle, second_t, second_angle);

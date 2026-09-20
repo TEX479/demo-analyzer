@@ -6,7 +6,7 @@ use crate::{
         parameters::{Parameter, Parameters, get_parameter_value},
     },
     util::{
-        helpers::{ViewAngle, valid_players},
+        helpers::{KeyValueVec, ViewAngle, valid_players},
         nocrex::jankguard::JankGuard,
     },
 };
@@ -17,8 +17,7 @@ use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
 pub struct AngleHistory {
-    // TODO: replace with custom history struct
-    ticks: Vec<HashMap<SteamID, ViewAngle>>,
+    ticks: Vec<KeyValueVec<SteamID, ViewAngle>>,
 
     jg: JankGuard,
     params: Parameters,
@@ -58,7 +57,7 @@ impl CheatAlgorithm for AngleHistory {
         let max_delta_first_third: f32 = get_parameter_value(&self.params, "max_delta_first_third")?;
         let min_delta_second_third: f32 = get_parameter_value(&self.params, "min_delta_second_third")?;
 
-        self.ticks.insert(0, HashMap::new());
+        self.ticks.insert(0, Default::default());
         self.ticks.truncate(tick_window as usize);
 
         for (player, _info, steam_id) in valid_players(players.iter()) {
@@ -71,7 +70,8 @@ impl CheatAlgorithm for AngleHistory {
                 continue;
             }
 
-            self.ticks
+            _ = self
+                .ticks
                 .get_mut(0)
                 .expect("the first tick was inserted earlier this function and must exist")
                 .insert(steam_id, ViewAngle::from(player));
@@ -89,6 +89,7 @@ impl CheatAlgorithm for AngleHistory {
                 continue;
             };
 
+            // TODO: understand why the following does what it does, or change it
             let mid = match_index.div_ceil(2);
             let mut mids = vec![mid];
 

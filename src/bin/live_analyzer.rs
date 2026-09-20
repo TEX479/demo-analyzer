@@ -68,7 +68,7 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
     // }
 
     let mut algos: Vec<Box<dyn CheatAlgorithm + Send>> = vec![
-        Box::new(ViewAngles180Degrees::new()),
+        Box::new(ViewAngles180Degrees::default()),
         Box::new(OOBPitch::new()),
         Box::new(AngleRepeat::new()),
         Box::new(AngleHistory::default()),

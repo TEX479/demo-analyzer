@@ -1,7 +1,7 @@
 use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::algorithm::{CheatAlgorithm, Detection},
-    util::helpers::{ViewAngle, valid_players, viewangle_delta},
+    util::helpers::{KeyValueVec, ViewAngle, valid_players, viewangle_delta},
 };
 use anyhow::Error;
 use serde_json::json;
@@ -13,9 +13,9 @@ use tf_demo_parser::ParserState;
 // To start, define a struct containing any information you want to store/share between events.
 // Here we want to track the view angle and pitch angle of each player on the previous tick.
 // Later we will compare the previous and current view angles to see if they are 180 degrees apart.
+#[derive(Default)]
 pub struct ViewAngles180Degrees {
-    // TODO: rewrite so it does not store the entire previous state
-    previous_angles: Vec<SmallPlayerCopy>,
+    previous_angles: KeyValueVec<SteamID, ViewAngle>,
     previous_tick: u32,
 }
 
@@ -23,28 +23,15 @@ pub struct ViewAngles180Degrees {
 // Use the new() function to initalize any variables specified in the struct.
 // IMPORTANT: new() gets called even if the algorithm is not selected! Don't do any non-ephemeral operations here; use CheatAlgorithm::init() instead.
 // Additional helper functions and consts also go here.
-
-impl ViewAngles180Degrees {
-    pub fn new() -> Self {
-        let analyser: ViewAngles180Degrees = ViewAngles180Degrees {
-            previous_angles: Vec::new(),
-            previous_tick: 0,
-        };
-        analyser
-    }
-}
-
-impl Default for ViewAngles180Degrees {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+//
+// Why do we not implement `Default`?
+// I am going to just go with `Default` because it just feels nicer. Thus, I'll delete the `new` method.
+// - tex
 
 // Implement the CheatAlgorithm trait. This is where the bulk of your algorithm resides.
 // Any interesting detections should be documented in a Detection object and returned within a vector.
 // You can attach whatever json data you want to each detection via the "data" field.
 // You don't have to implement every function in CheatAlgorithm; see its definition for a complete list of functions.
-
 impl CheatAlgorithm for ViewAngles180Degrees {
     // REQUIRED: Should this algorithm run by default if -a isn't specified?
     // Generally should be true, unless you're doing dev-only stuff (writing to files, printing debug output, etc).
@@ -60,7 +47,7 @@ impl CheatAlgorithm for ViewAngles180Degrees {
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
         let tick_delta = ticknum - self.previous_tick;
-        let mut new_player_history = Vec::new();
+        let mut new_player_history = KeyValueVec::new();
         let mut detections = Vec::new();
 
         // In the vast majority of cases you will only want to iterate over players that are:
@@ -69,16 +56,13 @@ impl CheatAlgorithm for ViewAngles180Degrees {
         // - Not a tf_bot (you can't convict a tf_bot)
         for (player, _info, steam_id) in valid_players(state.players.iter()) {
             let current_viewangle = ViewAngle::from(player);
-            new_player_history.push(SmallPlayerCopy {
-                steam_id,
-                viewangle: current_viewangle,
-            });
+            _ = new_player_history.insert(steam_id, current_viewangle);
 
-            let Some(previous_player) = self.previous_angles.iter().find(|player| player.steam_id == steam_id).copied() else {
+            let Some(previous_viewangle) = self.previous_angles.get(&steam_id).copied() else {
                 continue;
             };
 
-            let (va_delta, pa_delta) = viewangle_delta(current_viewangle, previous_player.viewangle, tick_delta);
+            let (va_delta, pa_delta) = viewangle_delta(current_viewangle, previous_viewangle, tick_delta);
 
             // Creating the detection object
             // Avoid creating multiple detection objects for the same player and tick.
@@ -100,10 +84,4 @@ impl CheatAlgorithm for ViewAngles180Degrees {
         // You can then return them in a later CheatAlgorithm::on_tick() or in CheatAlgorithm::finish().
         Ok(detections)
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SmallPlayerCopy {
-    pub steam_id: SteamID,
-    pub viewangle: ViewAngle,
 }

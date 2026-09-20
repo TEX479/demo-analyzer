@@ -104,7 +104,7 @@ fn analyze_demo_at_path(path: &Path) -> anyhow::Result<CheatAnalyser> {
 
 fn desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
     vec![
-        Box::new(ViewAngles180Degrees::new()),
+        Box::new(ViewAngles180Degrees::default()),
         Box::new(OOBPitch::new()),
         Box::new(AngleRepeat::new()),
         Box::new(AngleHistory::default()),

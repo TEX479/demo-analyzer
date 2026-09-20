@@ -1,9 +1,8 @@
 // Written by Nocrex
 
-use std::collections::HashMap;
-
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use anyhow::Context;
+use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 
@@ -20,22 +19,27 @@ struct PlayerData {
 
 #[derive(Debug, Clone, Default)]
 pub struct JankGuard {
+    // TODO: find a way to replace with faster `KeyValueVec`
     player_data: HashMap<SteamID, PlayerData>,
 }
 
 impl JankGuard {
+    /// ticks since last `GameEvent::PlayerTeleported`
     pub fn teleported(&self, player: &SteamID, tick: u32) -> u32 {
         tick - self.player_data.get(player).map_or(0, |pd| pd.last_teleport)
     }
 
+    /// ticks since last `GameEvent::PlayerSpawn | GameEvent::PostInventoryApplication`
     pub fn spawned(&self, player: &SteamID, tick: u32) -> u32 {
         tick - self.player_data.get(player).map_or(0, |pd| pd.last_spawn)
     }
 
+    /// ticks since the last time the player shot
     pub fn fired(&self, player: &SteamID, tick: u32) -> u32 {
         tick - self.player_data.get(player).map_or(0, |pd| pd.last_fire)
     }
 
+    /// the message types that `Self` handles
     pub fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
         Ok(vec![tf_demo_parser::MessageType::GameEvent, tf_demo_parser::MessageType::TempEntities])
     }

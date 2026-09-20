@@ -31,7 +31,7 @@ use crate::{
 pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
     vec![
         Box::new(AllMessages::new()),
-        Box::new(ViewAngles180Degrees::new()),
+        Box::new(ViewAngles180Degrees::default()),
         Box::new(ViewAnglesToCSV::new()),
         Box::new(WriteToFile::new().expect("could not get new WriteToFile algorithm")),
         Box::new(OOBPitch::new()),

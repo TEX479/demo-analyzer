@@ -7,7 +7,7 @@ use crate::{
         parameters::{Parameter, Parameters, get_parameter_value},
     },
     util::{
-        helpers::{ViewAngle, valid_players, viewangle_delta},
+        helpers::{KeyValueVec, ViewAngle, valid_players, viewangle_delta},
         nocrex::jankguard::JankGuard,
     },
 };
@@ -19,8 +19,7 @@ use tf_demo_parser::ParserState;
 
 #[derive(Default)]
 pub struct AimSnap {
-    // TODO: replace with custom history struct
-    ticks: Vec<(u32, HashMap<SteamID, ViewAngle>)>,
+    ticks: Vec<(u32, KeyValueVec<SteamID, ViewAngle>)>,
     jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
@@ -59,7 +58,7 @@ impl CheatAlgorithm for AimSnap {
 
         let noise_range: Range<f32> = noise_min..noise_max;
 
-        self.ticks.insert(0, (ticknum, HashMap::new()));
+        self.ticks.insert(0, (ticknum, Default::default()));
         self.ticks.truncate(5);
 
         for (player, _info, steam_id) in valid_players(players.iter()) {
@@ -73,7 +72,8 @@ impl CheatAlgorithm for AimSnap {
                 continue;
             }
 
-            self.ticks
+            _ = self
+                .ticks
                 .get_mut(0)
                 .context("no first tick in AimSnap")?
                 .1

@@ -5,6 +5,7 @@ use crate::{
         algorithm::{CheatAlgorithm, Detection},
         parameters::{Parameter, Parameters, get_parameter_value},
     },
+    util::helpers::KeyValueVec,
 };
 use anyhow::Error;
 use serde_json::{Map, Value};
@@ -19,7 +20,7 @@ use tf_demo_parser::{
 pub struct DoubleTap {
     params: Parameters,
 
-    shots: HashMap<SteamID, Shot>,
+    shots: KeyValueVec<SteamID, Shot>,
 }
 
 impl DoubleTap {
@@ -30,7 +31,7 @@ impl DoubleTap {
                 ("min_tick_scout".to_string(), Parameter::Int(17)),
                 ("min_tick_heavy".to_string(), Parameter::Int(3)),
             ]),
-            shots: HashMap::new(),
+            ..Default::default()
         }
     }
 
