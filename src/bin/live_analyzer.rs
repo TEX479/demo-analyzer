@@ -107,7 +107,6 @@ fn config_algorithms_desired(algorithms: &mut Vec<Box<dyn CheatAlgorithm + Send>
     }
 }
 
-// TODO: check if this needs to be thread safe
 static CONFIG: LazyLock<Option<Config>> = LazyLock::new(get_config_json);
 type Config = HashMap<String, Parameters>;
 

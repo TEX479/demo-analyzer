@@ -1,24 +1,25 @@
 // Written by Teltta
-use std::collections::HashMap;
-
-use crate::base::cheat_analyser_base::CheatAnalyserState;
-
-use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-
+use crate::{
+    base::cheat_analyser_base::CheatAnalyserState,
+    lib::{
+        algorithm::{CheatAlgorithm, Detection},
+        parameters::{Parameter, Parameters, get_parameter_value},
+    },
+};
 use anyhow::Error;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use steamid_ng::SteamID;
-use tf_demo_parser::ParserState;
-use tf_demo_parser::demo::gameevent_gen::GameEvent;
-use tf_demo_parser::demo::message::Message;
-use tf_demo_parser::demo::parser::analyser::UserId;
+use tf_demo_parser::{
+    ParserState,
+    demo::{gameevent_gen::GameEvent, message::Message, parser::analyser::UserId},
+};
 
 #[derive(Default)]
 pub struct DoubleTap {
     params: Parameters,
 
-    shots: HashMap<SteamID, Vec<u32>>,
+    shots: HashMap<SteamID, Shot>,
 }
 
 impl DoubleTap {
@@ -31,6 +32,15 @@ impl DoubleTap {
             ]),
             shots: HashMap::new(),
         }
+    }
+
+    fn get_weapon_mapping(&self, weapon_id: u32) -> Option<u32> {
+        match weapon_id {
+            16 => get_parameter_value::<i32>(&self.params, "min_tick_scout").ok(),
+            18 => get_parameter_value::<i32>(&self.params, "min_tick_heavy").ok(),
+            _ => None,
+        }
+        .map(|x| x as u32)
     }
 }
 
@@ -55,7 +65,6 @@ impl CheatAlgorithm for DoubleTap {
         Ok(vec![tf_demo_parser::MessageType::GameEvent])
     }
 
-    // TODO: refactor this mess
     fn on_message(
         &mut self,
         message: &tf_demo_parser::demo::message::Message,
@@ -70,22 +79,11 @@ impl CheatAlgorithm for DoubleTap {
         if let Message::GameEvent(event_msg) = message
             && let GameEvent::PlayerHurt(hurt) = &event_msg.event
         {
-            let assert_pvs: bool = get_parameter_value(&self.params, "assert_pvs")?;
-            let min_tick_scout: i32 = get_parameter_value(&self.params, "min_tick_scout")?;
-            let min_tick_heavy: i32 = get_parameter_value(&self.params, "min_tick_heavy")?;
-
-            // format;
-            // weapon id, min ticks
-            let weapon_mapping = HashMap::from([
-                (16, min_tick_scout as u32), // scout primary
-                (18, min_tick_heavy as u32), // heavy primary
-            ]);
-
             let dmg = hurt.damage_amount as u32;
             let weapon = hurt.weapon_id as u32;
 
+            // ignore wrap assassin bleed
             if is_cleaver_or_wrap_assassin(weapon, dmg) {
-                // ignore wrap assassin bleed
                 return Ok(vec![]);
             }
 
@@ -96,45 +94,48 @@ impl CheatAlgorithm for DoubleTap {
             let Some(attacker_sid) = state.get_id64_from_userid(attacker_uid) else {
                 return Ok(Vec::new());
             };
-            let Some(_victim_sid) = state.get_id64_from_userid(victim_uid) else {
+            let Some(victim_sid) = state.get_id64_from_userid(victim_uid) else {
                 return Ok(Vec::new());
             };
 
-            let attacker = match players.iter().find(|x| {
+            let Some(attacker) = players.iter().find(|x| {
                 x.info
                     .as_ref()
                     .is_some_and(|info| SteamID::from_steam3(&info.steam_id).unwrap_or_default() == attacker_sid)
-            }) {
-                Some(p) => p,
-                None => return Ok(vec![]),
+            }) else {
+                return Ok(vec![]);
             };
 
-            if assert_pvs && !attacker.in_pvs {
-                return Ok(vec![]);
+            if !attacker.in_pvs {
+                let assert_pvs = get_parameter_value::<bool>(&self.params, "assert_pvs")?;
+                if assert_pvs {
+                    return Ok(vec![]);
+                }
             }
 
-            let shots = self.shots.entry(attacker_sid).or_default();
-
-            let past_shot = shots.clone();
-
-            shots.clear();
-            shots.extend([ticknum, weapon, victim_uid.into(), dmg]);
-
-            if past_shot.len() < 2 {
-                return Ok(vec![]);
-            }
-
-            let past_shot: [u32; 4] = match past_shot.try_into() {
-                Ok(arr) => arr,
-                Err(_) => return Ok(vec![]), // or handle error
-            };
-
-            let [past_tick, past_weapon, past_victim, past_dmg] = past_shot;
-            let Some(&min_diff) = weapon_mapping.get(&weapon) else {
+            let Some(past_shot) = self.shots.insert(
+                attacker_sid,
+                Shot {
+                    tick: ticknum,
+                    weapon,
+                    victim_uid,
+                    dmg,
+                },
+            ) else {
                 return Ok(vec![]);
             };
 
-            if past_weapon != weapon || past_victim != u32::from(victim_uid) {
+            let Shot {
+                tick: past_tick,
+                weapon: past_weapon,
+                victim_uid: past_victim,
+                dmg: past_dmg,
+            } = past_shot;
+            let Some(min_diff) = self.get_weapon_mapping(weapon) else {
+                return Ok(vec![]);
+            };
+
+            if past_weapon != weapon || past_victim != victim_uid {
                 return Ok(vec![]);
             }
 
@@ -147,7 +148,7 @@ impl CheatAlgorithm for DoubleTap {
                     ("tick_1", Value::from(past_tick)),
                     ("tick_2", Value::from(ticknum)),
                     ("tick_diff", Value::from(diff)),
-                    ("victim", Value::from(u32::from(victim_uid))),
+                    ("victim", Value::from(victim_sid.steam3())),
                     ("weapon_id", Value::from(weapon)),
                     ("damage_1", Value::from(past_dmg)),
                     ("damage_2", Value::from(dmg)),
@@ -176,4 +177,12 @@ impl CheatAlgorithm for DoubleTap {
     fn params(&mut self) -> Option<&mut Parameters> {
         Some(&mut self.params)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Shot {
+    pub tick: u32,
+    pub weapon: u32,
+    pub victim_uid: UserId,
+    pub dmg: u32,
 }

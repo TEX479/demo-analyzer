@@ -1,16 +1,15 @@
 // Written by Teltta
-use std::collections::HashMap;
-
 use crate::{
     base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
+    lib::{
+        algorithm::{CheatAlgorithm, Detection},
+        parameters::{Parameter, Parameters, get_parameter_value},
+    },
     util::{helpers::ViewAngle, nocrex::jankguard::JankGuard},
 };
-
-use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-
 use anyhow::{Context, Error};
 use serde_json::json;
+use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
@@ -116,7 +115,7 @@ impl CheatAlgorithm for AngleHistory {
                         algorithm: self.algorithm_name().to_string(),
                         player: steam_id,
                         data: json!({
-                            // TODO: check why there is the same angle twice
+                            // TODO: check if `current_angle` needs to be present twice
                             "angle_current": current_angle,
                             "angle_middle": mid_angle,
                             "angle_trigger": current_angle,
