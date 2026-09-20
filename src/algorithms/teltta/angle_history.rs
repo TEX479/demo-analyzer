@@ -61,9 +61,7 @@ impl CheatAlgorithm for AngleHistory {
         self.ticks.insert(0, HashMap::new());
         self.ticks.truncate(tick_window as usize);
 
-        for (player, info) in valid_players(players.iter()) {
-            let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
-
+        for (player, _info, steam_id) in valid_players(players.iter()) {
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {

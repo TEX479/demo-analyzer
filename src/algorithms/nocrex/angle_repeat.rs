@@ -61,9 +61,7 @@ impl CheatAlgorithm for AngleRepeat {
         let min_first_second_angle_delta: f32 = get_parameter_value(&self.params, "min_first_second_angle_delta")?;
         let max_first_third_angle_delta: f32 = get_parameter_value(&self.params, "max_first_third_angle_delta")?;
 
-        for (player, info) in valid_players(players.iter()) {
-            let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
-
+        for (player, _info, steam_id) in valid_players(players.iter()) {
             let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, *p)));
             let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|p| (*t, *p)));
 

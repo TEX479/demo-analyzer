@@ -3,6 +3,7 @@
 
 use crate::base::cheat_analyser_base::{Player, PlayerState};
 use serde::{Deserialize, Serialize};
+use steamid_ng::SteamID;
 use tf_demo_parser::demo::message::packetentities::EntityId;
 
 // Compute the difference in viewangles. We have to account for the fact viewangles are in a circle.
@@ -25,6 +26,13 @@ pub fn handle_to_entid(handle: u32) -> EntityId {
     EntityId::from(entid)
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ViewAngle {
     /// yaw aka `Player.view_angle`
@@ -34,22 +42,32 @@ pub struct ViewAngle {
 }
 
 impl ViewAngle {
-    // TODO: wrap the 3 floats in a `Vec3` struct
-    pub fn to_unit_vec(self) -> (f32, f32, f32) {
+    /// calculate the normalized `Vec3` that points in `ViewAngle`
+    pub fn to_unit_vec(self) -> Vec3 {
         let Self { yaw, pitch } = self;
 
         let yaw = yaw.to_radians();
         let pitch = pitch.to_radians();
-        (pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos())
+        Vec3 {
+            x: pitch.cos() * yaw.cos(),
+            y: pitch.sin() * yaw.sin(),
+            z: -pitch.sin(),
+        }
     }
 
-    /// Compute the total angular difference between two angles
+    /// Compute the total angular difference between two angles in degrees
     pub fn delta(self, other: Self) -> f32 {
         let vec1 = self.to_unit_vec();
         let vec2 = other.to_unit_vec();
 
-        let dot = vec1.0 * vec2.0 + vec1.1 * vec2.1 + vec1.2 * vec2.2;
+        let dot = vec1.dot(vec2);
         dot.acos().to_degrees()
+    }
+}
+
+impl Vec3 {
+    pub fn dot(self, rhs: Self) -> f32 {
+        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
     }
 }
 
@@ -62,10 +80,29 @@ impl From<&Player> for ViewAngle {
     }
 }
 
+impl From<tf_demo_parser::demo::vector::Vector> for Vec3 {
+    fn from(value: tf_demo_parser::demo::vector::Vector) -> Self {
+        let tf_demo_parser::demo::vector::Vector { x, y, z } = value;
+        Self { x, y, z }
+    }
+}
+
 pub fn valid_players<'a>(
     players: impl Iterator<Item = &'a Player>,
-) -> impl Iterator<Item = (&'a Player, &'a tf_demo_parser::demo::parser::analyser::UserInfo)> {
+) -> impl Iterator<Item = (&'a Player, &'a tf_demo_parser::demo::parser::analyser::UserInfo, SteamID)> {
     players
         .filter(|p| p.in_pvs && p.state == PlayerState::Alive)
-        .filter_map(|p| p.info.as_ref().map(|i| (p, i)).filter(|(_, i)| i.steam_id != "BOT"))
+        .filter_map(|p| p.info.as_ref().map(|i| (p, i)))
+        .filter_map(|(p, i)| SteamID::from_steam3(&i.steam_id).ok().map(|id| (p, i, id)))
+}
+
+pub fn valid_player<'a>(
+    players: impl Iterator<Item = &'a Player>,
+    steam_id: SteamID,
+) -> Option<(&'a Player, &'a tf_demo_parser::demo::parser::analyser::UserInfo)> {
+    players
+        .filter(|p| p.in_pvs && p.state == PlayerState::Alive)
+        .filter_map(|p| p.info.as_ref().and_then(|i| SteamID::from_steam3(&i.steam_id).ok().map(|id| (p, i, id))))
+        .find(|(_, _, id)| *id == steam_id)
+        .map(|(p, i, _)| (p, i))
 }

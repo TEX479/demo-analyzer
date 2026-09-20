@@ -8,14 +8,14 @@ use crate::{
     },
     util::helpers::valid_players,
 };
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::{ParserState, demo::message::Message};
 
 pub struct OOBPitch {
-    last_detections: HashSet<String>,
+    last_detections: Vec<SteamID>,
     server_name: String,
 
     params: Parameters,
@@ -24,7 +24,7 @@ pub struct OOBPitch {
 impl OOBPitch {
     pub fn new() -> Self {
         let analyser: OOBPitch = OOBPitch {
-            last_detections: HashSet::new(),
+            last_detections: Vec::new(),
             server_name: "".to_string(),
             params: HashMap::from([
                 ("min_pitch".to_string(), Parameter::Float(-89.999)),
@@ -72,23 +72,21 @@ impl CheatAlgorithm for OOBPitch {
         if let Message::NetTick(_) = message {
             let ticknum = u32::from(state.tick);
 
-            let mut detections = HashSet::new();
+            let mut detections = Vec::new();
 
             let min_pitch: f32 = get_parameter_value(&self.params, "min_pitch")?;
             let max_pitch: f32 = get_parameter_value(&self.params, "max_pitch")?;
 
             let is_valve_server = self.server_name.starts_with("Valve Matchmaking Server");
 
-            for (player, info) in valid_players(state.players.iter()) {
-                let steam_id = &info.steam_id;
-
+            for (player, _info, steam_id) in valid_players(state.players.iter()) {
                 if !(min_pitch..=max_pitch).contains(&player.pitch_angle) {
-                    detections.insert(steam_id.clone());
-                    if !self.last_detections.contains(steam_id) {
+                    detections.push(steam_id);
+                    if !self.last_detections.contains(&steam_id) {
                         submitted_detections.push(Detection {
                             tick: ticknum,
                             algorithm: self.algorithm_name().to_string(),
-                            player: SteamID::from_steam3(steam_id).context(format!("invalid steam_id3: {:?}", steam_id))?,
+                            player: steam_id,
                             data: json!({
                                 "pitch": player.pitch_angle,
                                 "valve_server": is_valve_server

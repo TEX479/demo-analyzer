@@ -1,13 +1,11 @@
 // Written by Teltta
-use std::collections::HashMap;
-
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-
+use crate::util::helpers::valid_player;
 use anyhow::Error;
 use serde_json::{Map, Value};
-use steamid_ng::SteamID;
+use std::collections::HashMap;
 use tf_demo_parser::ParserState;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::Message;
@@ -89,32 +87,16 @@ impl CheatAlgorithm for BackTrack {
 
             let players = &state.players;
 
-            // TODO: use `crate::util::helper::valid_players`
-            let attacker = match players.iter().find(|x| {
-                x.info
-                    .as_ref()
-                    .is_some_and(|info| SteamID::from_steam3(&info.steam_id).unwrap_or_default() == attacker_sid)
-            }) {
-                Some(p) => p,
-                None => return Ok(vec![]),
+            let Some((attacker, _attacker_userinfo)) = valid_player(players.iter(), attacker_sid) else {
+                return Ok(vec![]);
             };
             let attacker_pos = attacker.position;
 
-            // TODO: use `crate::util::helper::valid_players`
-            let victim = match players.iter().find(|x| {
-                x.info
-                    .as_ref()
-                    .is_some_and(|info| SteamID::from_steam3(&info.steam_id).unwrap_or_default() == victim_sid)
-            }) {
-                Some(p) => p,
-                None => return Ok(vec![]),
+            let Some((victim, _victim_userinfo)) = valid_player(players.iter(), victim_sid) else {
+                return Ok(vec![]);
             };
             let victim_pos = victim.position;
             let victim_health = victim.health;
-
-            if !attacker.in_pvs || !victim.in_pvs {
-                return Ok(vec![]);
-            }
 
             if attacker_uid != victim_uid && is_backstab(damage_amount, is_crit, weapon_id, victim_health) {
                 let angle_diff = angle_diff(attacker.view_angle, victim.view_angle).abs();
@@ -143,6 +125,7 @@ impl CheatAlgorithm for BackTrack {
 
                     // ########################
 
+                    // TODO: understand (or change) the following part. (like *why* is it the way it is)
                     let u200b = "\u{200b}";
                     let data: Vec<(&str, Value)> = vec![
                         ("angle_attacker", Value::from(attacker.view_angle)),

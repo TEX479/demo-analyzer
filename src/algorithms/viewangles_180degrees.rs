@@ -1,13 +1,12 @@
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, PlayerState},
+    base::cheat_analyser_base::CheatAnalyserState,
+    lib::algorithm::{CheatAlgorithm, Detection},
     util::helpers::{ViewAngle, valid_players, viewangle_delta},
 };
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
-
-use crate::lib::algorithm::{CheatAlgorithm, Detection};
 
 // This example file looks for any examples of players rotating 180 degrees within a single server tick.
 
@@ -16,7 +15,8 @@ use crate::lib::algorithm::{CheatAlgorithm, Detection};
 // Later we will compare the previous and current view angles to see if they are 180 degrees apart.
 pub struct ViewAngles180Degrees {
     // TODO: rewrite so it does not store the entire previous state
-    previous: Option<CheatAnalyserState>,
+    previous_angles: Vec<SmallPlayerCopy>,
+    previous_tick: u32,
 }
 
 // Then implement a pub fn new for your struct.
@@ -26,7 +26,10 @@ pub struct ViewAngles180Degrees {
 
 impl ViewAngles180Degrees {
     pub fn new() -> Self {
-        let analyser: ViewAngles180Degrees = ViewAngles180Degrees { previous: None };
+        let analyser: ViewAngles180Degrees = ViewAngles180Degrees {
+            previous_angles: Vec::new(),
+            previous_tick: 0,
+        };
         analyser
     }
 }
@@ -56,38 +59,27 @@ impl CheatAlgorithm for ViewAngles180Degrees {
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
-        let players = &state.players;
-
+        let tick_delta = ticknum - self.previous_tick;
+        let mut new_player_history = Vec::new();
         let mut detections = Vec::new();
 
         // In the vast majority of cases you will only want to iterate over players that are:
         // - In PVS (data is being sent to the client)
         // - Alive (you can't cheat if you're dead)
         // - Not a tf_bot (you can't convict a tf_bot)
-        for (player, info) in valid_players(players.iter()) {
-            let steam_id = &info.steam_id;
-            let tick_delta = {
-                if ticknum == 0 {
-                    0
-                } else {
-                    ticknum - self.previous.as_ref().map_or(0, |pstate| pstate.tick.into())
-                }
+        for (player, _info, steam_id) in valid_players(state.players.iter()) {
+            let current_viewangle = ViewAngle::from(player);
+            new_player_history.push(SmallPlayerCopy {
+                steam_id,
+                viewangle: current_viewangle,
+            });
+
+            let Some(previous_player) = self.previous_angles.iter().find(|player| player.steam_id == steam_id).copied() else {
+                continue;
             };
 
-            let (va_delta, pa_delta) = self.previous.as_ref().map_or((f32::NAN, f32::NAN), |prev_state| {
-                match prev_state
-                    .players
-                    .iter()
-                    .find(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|i| i.steam_id == *steam_id))
-                {
-                    Some(prev_player) => {
-                        let current_angle = ViewAngle::from(player);
-                        let previous_angle = ViewAngle::from(prev_player);
-                        viewangle_delta(current_angle, previous_angle, tick_delta)
-                    }
-                    None => (f32::NAN, f32::NAN),
-                }
-            });
+            let (va_delta, pa_delta) = viewangle_delta(current_viewangle, previous_player.viewangle, tick_delta);
+
             // Creating the detection object
             // Avoid creating multiple detection objects for the same player and tick.
             // Nothing will break if you do, but it will overrepresent the data point.
@@ -95,16 +87,23 @@ impl CheatAlgorithm for ViewAngles180Degrees {
                 detections.push(Detection {
                     tick: ticknum,
                     algorithm: self.algorithm_name().to_string(),
-                    player: SteamID::from_steam3(steam_id).context(format!("invalid steam_id3: {:?}", steam_id))?,
+                    player: steam_id,
                     data: json!({ "va_delta": va_delta, "pa_delta": pa_delta }),
                 });
             }
         }
-        self.previous = Some(state.clone());
+        self.previous_tick = state.tick.into();
+        self.previous_angles = new_player_history;
         // Any detections returned are official and final!
         // If you don't want to return any detections, just return an empty vector.
         // If your algorithm needs future ticks, you can store the detections within your algorithm's struct.
         // You can then return them in a later CheatAlgorithm::on_tick() or in CheatAlgorithm::finish().
         Ok(detections)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SmallPlayerCopy {
+    pub steam_id: SteamID,
+    pub viewangle: ViewAngle,
 }
