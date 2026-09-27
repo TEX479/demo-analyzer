@@ -24,10 +24,19 @@ pub mod algorithms {
         pub mod backtrack;
         pub mod double_tap;
     }
+    pub mod fidoo {
+        pub mod auto_backstab;
+        pub mod bunnyhop;
+        pub mod invalid_equip_region;
+        pub mod nospread;
+        pub mod psilent4;
+        pub mod silent_aim;
+    }
 }
 
 pub mod util {
     pub mod helpers;
+    pub mod schema_equip_regions;
     pub mod nocrex {
         pub mod jankguard;
     }

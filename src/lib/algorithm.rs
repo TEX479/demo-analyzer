@@ -7,6 +7,14 @@ pub use crate::algorithms::{
     viewangles_180degrees::ViewAngles180Degrees,
     viewangles_to_csv::ViewAnglesToCSV,
     write_to_file::WriteToFile,
+    fidoo:: {
+        auto_backstab::AutoBackstab,
+        bunnyhop::BunnyHop,
+        invalid_equip_region::InvalidEquipRegion,
+        nospread::NoSpread,
+        psilent4::Psilent4,
+        silent_aim::SilentAim,
+    }
 };
 
 use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
@@ -41,6 +49,12 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
         Box::new(AngleAccelerationAnalyzer::default()),
+        Box::new(AutoBackstab::new()),
+        Box::new(InvalidEquipRegion::new()),
+        Box::new(NoSpread::new()),
+        Box::new(Psilent4::new()),
+        Box::new(SilentAim::new()),
+
     ]
 }
 

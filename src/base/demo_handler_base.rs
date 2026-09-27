@@ -13,6 +13,12 @@ use tf_demo_parser::{ParserState, Result};
 use tf_demo_parser::demo::data::{DemoTick, ServerTick};
 use tf_demo_parser::demo::header::Header;
 
+pub trait DemoHandlerAnalyser: MessageHandler {
+    fn handle_user_cmd(&mut self, _packet: tf_demo_parser::demo::packet::usercmd::UserCmdPacket) {}
+}
+
+impl DemoHandlerAnalyser for NullHandler {}
+
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct CheatDemoHandler<T: MessageHandler> {
@@ -35,7 +41,7 @@ impl Default for CheatDemoHandler<NullHandler> {
     }
 }
 
-impl<'a, T: MessageHandler> CheatDemoHandler<T> {
+impl<T: DemoHandlerAnalyser> CheatDemoHandler<T> {
     pub fn with_analyser(analyser: T) -> Self {
         let state_handler = ParserState::new(24, T::does_handle, false);
 
@@ -89,6 +95,9 @@ impl<'a, T: MessageHandler> CheatDemoHandler<T> {
                     }
                 }
             }
+            Packet::UserCmd(packet) => {
+                self.analyser.handle_user_cmd(packet);
+            }
             _ => {}
         };
         Ok(())
@@ -138,7 +147,7 @@ impl<'a, T: MessageHandler> CheatDemoHandler<T> {
     }
 }
 
-impl<T: MessageHandler + BorrowMessageHandler> CheatDemoHandler<T> {
+impl<T: DemoHandlerAnalyser + BorrowMessageHandler> CheatDemoHandler<T> {
     #[allow(dead_code)]
     pub fn borrow_output(&self) -> &T::Output {
         self.analyser.borrow_output(&self.state_handler)
