@@ -1,21 +1,18 @@
-use std::collections::{HashMap, HashSet};
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
-use steamid_ng::SteamID;
+use std::collections::{HashMap, HashSet};
 use tf_demo_parser::demo::data::DemoTick;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
-use tf_demo_parser::demo::message::packetentities::{EntityId, UpdateType};
 use tf_demo_parser::demo::message::Message;
+use tf_demo_parser::demo::message::packetentities::{EntityId, UpdateType};
 use tf_demo_parser::demo::parser::analyser::Class;
 use tf_demo_parser::{MessageType, ParserState};
 
-use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
+use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
-use crate::util::schema_equip_regions::{
-    check_cosmetic_conflict, get_cosmetic_info, is_action_item, is_dummy_or_invalid,
-    is_weapon_wearable, CosmeticInfo,
-};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::util::helpers::player_finders::valid_players;
+use crate::util::schema_equip_regions::{CosmeticInfo, check_cosmetic_conflict, get_cosmetic_info, is_action_item, is_dummy_or_invalid, is_weapon_wearable};
 
 #[derive(Debug, Clone)]
 struct WearableEntityState {
@@ -56,7 +53,6 @@ impl InvalidEquipRegion {
     pub fn new() -> Self {
         Self {
             params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
                 ("min_persistence_ticks".to_string(), Parameter::Int(600)),
                 ("check_cosmetic_limit".to_string(), Parameter::Bool(true)),
                 ("ignore_quickswitch".to_string(), Parameter::Bool(true)),
@@ -79,8 +75,8 @@ impl InvalidEquipRegion {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
-    fn default(&self) -> bool {
+impl CheatAlgorithm for InvalidEquipRegion {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
@@ -102,18 +98,8 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
         ])
     }
 
-    fn on_message(
-        &mut self,
-        message: &Message,
-        state: &CheatAnalyserState,
-        pstate: &ParserState,
-        tick: DemoTick,
-    ) -> Result<Vec<Detection>, Error> {
+    fn on_message(&mut self, message: &Message, state: &CheatAnalyserState, pstate: &ParserState, tick: DemoTick) -> Result<Vec<Detection>, Error> {
         self.current_tick = u32::from(tick);
-
-        if !get_parameter_value::<bool>(&self.params, "enabled") {
-            return Ok(vec![]);
-        }
 
         match message {
             Message::ServerInfo(si) => {
@@ -135,32 +121,32 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
                 }
                 GameEvent::PlayerDeath(death) => {
                     let victim_uid = u32::from(death.user_id);
-                    if let Some(player) = state.players.iter().find(|p| {
-                        p.info
-                            .as_ref()
-                            .is_some_and(|info| u32::from(info.user_id) == victim_uid)
-                    }) {
+                    if let Some(player) = state
+                        .players
+                        .iter()
+                        .find(|p| p.info.as_ref().is_some_and(|info| u32::from(info.user_id) == victim_uid))
+                    {
                         self.advance_generation(player.entity, false);
                     }
                 }
                 GameEvent::PlayerSpawn(spawn) => {
                     let spawn_uid = u32::from(spawn.user_id);
-                    if let Some(player) = state.players.iter().find(|p| {
-                        p.info
-                            .as_ref()
-                            .is_some_and(|info| u32::from(info.user_id) == spawn_uid)
-                    }) {
+                    if let Some(player) = state
+                        .players
+                        .iter()
+                        .find(|p| p.info.as_ref().is_some_and(|info| u32::from(info.user_id) == spawn_uid))
+                    {
                         let in_pvs = player.in_pvs;
                         self.advance_generation(player.entity, in_pvs);
                     }
                 }
                 GameEvent::PostInventoryApplication(inv) => {
                     let inv_uid = u32::from(inv.user_id);
-                    if let Some(player) = state.players.iter().find(|p| {
-                        p.info
-                            .as_ref()
-                            .is_some_and(|info| u32::from(info.user_id) == inv_uid)
-                    }) {
+                    if let Some(player) = state
+                        .players
+                        .iter()
+                        .find(|p| p.info.as_ref().is_some_and(|info| u32::from(info.user_id) == inv_uid))
+                    {
                         let in_pvs = player.in_pvs;
                         let p = self.players.entry(player.entity).or_default();
                         p.conflict_ticks = 0;
@@ -235,16 +221,14 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
                         }
 
                         let tick_u32 = self.current_tick;
-                        let w = self.wearables.entry(entity.entity_index).or_insert_with(|| {
-                            WearableEntityState {
-                                owner: EntityId::from(0u32),
-                                item_def_index: 0,
-                                account_id: 0,
-                                is_disguise: false,
-                                nodraw: false,
-                                last_seen_tick: tick_u32,
-                                spawn_generation: 0,
-                            }
+                        let w = self.wearables.entry(entity.entity_index).or_insert_with(|| WearableEntityState {
+                            owner: EntityId::from(0u32),
+                            item_def_index: 0,
+                            account_id: 0,
+                            is_disguise: false,
+                            nodraw: false,
+                            last_seen_tick: tick_u32,
+                            spawn_generation: 0,
                         });
 
                         if let Some(owner) = owner_ent {
@@ -275,16 +259,15 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
                 }
             }
             Message::NetTick(_) => {
-                let min_persistence_ticks =
-                    get_parameter_value::<i32>(&self.params, "min_persistence_ticks").max(1) as u32;
+                let min_persistence_ticks = get_parameter_value::<i32>(&self.params, "min_persistence_ticks")?.max(1) as u32;
                 let check_cosmetic_limit =
-                    get_parameter_value::<bool>(&self.params, "check_cosmetic_limit");
+                    get_parameter_value::<bool>(&self.params, "check_cosmetic_limit").context("\"check_cosmetic_limit\" must be a valid value")?;
                 let ignore_quickswitch =
-                    get_parameter_value::<bool>(&self.params, "ignore_quickswitch");
+                    get_parameter_value::<bool>(&self.params, "ignore_quickswitch").context("\"ignore_quickswitch\" must be a valid value")?;
                 let valve_servers_only =
-                    get_parameter_value::<bool>(&self.params, "valve_servers_only");
+                    get_parameter_value::<bool>(&self.params, "valve_servers_only").context("\"valve_servers_only\" must be a valid value")?;
                 let ignore_preset_swap =
-                    get_parameter_value::<bool>(&self.params, "ignore_preset_swap");
+                    get_parameter_value::<bool>(&self.params, "ignore_preset_swap").context("\"ignore_preset_swap\" must be a valid value")?;
                 let is_valve_server = self.server_name.contains("Valve Matchmaking Server");
 
                 if valve_servers_only && !is_valve_server {
@@ -293,27 +276,7 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
 
                 let mut detections = Vec::new();
 
-                for player in &state.players {
-                    if player.state != PlayerState::Alive {
-                        continue;
-                    }
-
-                    let steam_id64 = match &player.info {
-                        Some(info) => {
-                            if info.steam_id == "BOT" {
-                                continue;
-                            }
-                            SteamID::from_steam3(&info.steam_id)
-                                .map(u64::from)
-                                .unwrap_or(0)
-                        }
-                        None => continue,
-                    };
-
-                    if steam_id64 == 0 {
-                        continue;
-                    }
-
+                for (player, _, steam_id64) in valid_players(state.players.iter()) {
                     let p_state = self.players.entry(player.entity).or_default();
 
                     // If player changed class, advance generation to invalidate previous class wearables
@@ -327,7 +290,7 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
 
                     let target_gen = p_state.generation;
 
-                    let player_account_id = (steam_id64 & 0xFFFFFFFF) as u32;
+                    let player_account_id = (u64::from(steam_id64) & 0xFFFFFFFF) as u32;
 
                     // Collect active cosmetic wearables for current spawn generation
                     let mut active_cosmetic_map: HashMap<u16, CosmeticInfo> = HashMap::new();
@@ -347,8 +310,7 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
                         }
                     }
 
-                    let mut active_items: Vec<(u16, CosmeticInfo)> =
-                        active_cosmetic_map.into_iter().collect();
+                    let mut active_items: Vec<(u16, CosmeticInfo)> = active_cosmetic_map.into_iter().collect();
                     active_items.sort_by_key(|(id, _)| *id);
                     let loadout_key: Vec<u16> = active_items.iter().map(|(id, _)| *id).collect();
 
@@ -373,10 +335,7 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
                     let exceeds_limit = check_cosmetic_limit && active_items.len() > 3;
                     let is_violating = has_conflict || exceeds_limit;
 
-                    let hat_cosmetics_count = active_items
-                        .iter()
-                        .filter(|(_, info)| info.regions.iter().any(|r| *r == "hat"))
-                        .count();
+                    let hat_cosmetics_count = active_items.iter().filter(|(_, info)| info.regions.iter().any(|r| *r == "hat")).count();
 
                     let is_preset_swap_candidate = has_conflict
                         && active_items.len() <= 3
@@ -391,8 +350,7 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
                         }
 
                         let can_flag = if ignore_preset_swap && is_preset_swap_candidate {
-                            p_state.witnessed_in_pvs_reset
-                                && p_state.post_reset_conflict_ticks >= min_persistence_ticks
+                            p_state.witnessed_in_pvs_reset && p_state.post_reset_conflict_ticks >= min_persistence_ticks
                         } else {
                             p_state.conflict_ticks >= min_persistence_ticks
                         };
@@ -467,6 +425,7 @@ impl<'a> CheatAlgorithm<'a> for InvalidEquipRegion {
 mod tests {
     use super::*;
     use crate::base::cheat_analyser_base::Player;
+    use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
     use tf_demo_parser::demo::message::NetTickMessage;
 
     #[test]
@@ -506,24 +465,30 @@ mod tests {
         p.info = Some(uinfo.into());
         state.players.push(p);
 
-        algo.wearables.insert(EntityId::from(101u32), WearableEntityState {
-            owner: player_ent,
-            item_def_index: 378, // Team Captain (hat)
-            account_id: 1,
-            is_disguise: false,
-            nodraw: false,
-            last_seen_tick: 1,
-            spawn_generation: 0,
-        });
-        algo.wearables.insert(EntityId::from(102u32), WearableEntityState {
-            owner: player_ent,
-            item_def_index: 538, // Killer Exclusive (hat)
-            account_id: 1,
-            is_disguise: false,
-            nodraw: false,
-            last_seen_tick: 1,
-            spawn_generation: 0,
-        });
+        algo.wearables.insert(
+            EntityId::from(101u32),
+            WearableEntityState {
+                owner: player_ent,
+                item_def_index: 378, // Team Captain (hat)
+                account_id: 1,
+                is_disguise: false,
+                nodraw: false,
+                last_seen_tick: 1,
+                spawn_generation: 0,
+            },
+        );
+        algo.wearables.insert(
+            EntityId::from(102u32),
+            WearableEntityState {
+                owner: player_ent,
+                item_def_index: 538, // Killer Exclusive (hat)
+                account_id: 1,
+                is_disguise: false,
+                nodraw: false,
+                last_seen_tick: 1,
+                spawn_generation: 0,
+            },
+        );
 
         let pstate = ParserState::new(24, |_| false, false);
         let msg = Message::NetTick(NetTickMessage {
@@ -557,24 +522,30 @@ mod tests {
         p.info = Some(uinfo.into());
         state.players.push(p);
 
-        algo.wearables.insert(EntityId::from(101u32), WearableEntityState {
-            owner: player_ent,
-            item_def_index: 378, // Team Captain (hat)
-            account_id: 1,
-            is_disguise: false,
-            nodraw: false,
-            last_seen_tick: 1,
-            spawn_generation: 0,
-        });
-        algo.wearables.insert(EntityId::from(102u32), WearableEntityState {
-            owner: player_ent,
-            item_def_index: 538, // Killer Exclusive (hat)
-            account_id: 1,
-            is_disguise: false,
-            nodraw: false,
-            last_seen_tick: 1,
-            spawn_generation: 0,
-        });
+        algo.wearables.insert(
+            EntityId::from(101u32),
+            WearableEntityState {
+                owner: player_ent,
+                item_def_index: 378, // Team Captain (hat)
+                account_id: 1,
+                is_disguise: false,
+                nodraw: false,
+                last_seen_tick: 1,
+                spawn_generation: 0,
+            },
+        );
+        algo.wearables.insert(
+            EntityId::from(102u32),
+            WearableEntityState {
+                owner: player_ent,
+                item_def_index: 538, // Killer Exclusive (hat)
+                account_id: 1,
+                is_disguise: false,
+                nodraw: false,
+                last_seen_tick: 1,
+                spawn_generation: 0,
+            },
+        );
 
         let pstate = ParserState::new(24, |_| false, false);
         let msg = Message::NetTick(NetTickMessage {
@@ -610,26 +581,32 @@ mod tests {
         state.players.push(p);
 
         // Wearable 1: owned by player, def 940 (Ghostly Gibus, hat)
-        algo.wearables.insert(EntityId::from(101u32), WearableEntityState {
-            owner: player_ent,
-            item_def_index: 940,
-            account_id: player_account_id,
-            is_disguise: false,
-            nodraw: false,
-            last_seen_tick: 1,
-            spawn_generation: 0,
-        });
+        algo.wearables.insert(
+            EntityId::from(101u32),
+            WearableEntityState {
+                owner: player_ent,
+                item_def_index: 940,
+                account_id: player_account_id,
+                is_disguise: false,
+                nodraw: false,
+                last_seen_tick: 1,
+                spawn_generation: 0,
+            },
+        );
 
         // Wearable 2: orphaned entity with different account_id (e.g. 345727541 from disconnected player), def 471 (hat)
-        algo.wearables.insert(EntityId::from(102u32), WearableEntityState {
-            owner: player_ent,
-            item_def_index: 471,
-            account_id: 345727541, // Mismatch!
-            is_disguise: false,
-            nodraw: false,
-            last_seen_tick: 1,
-            spawn_generation: 0,
-        });
+        algo.wearables.insert(
+            EntityId::from(102u32),
+            WearableEntityState {
+                owner: player_ent,
+                item_def_index: 471,
+                account_id: 345727541, // Mismatch!
+                is_disguise: false,
+                nodraw: false,
+                last_seen_tick: 1,
+                spawn_generation: 0,
+            },
+        );
 
         let pstate = ParserState::new(24, |_| false, false);
         let msg = Message::NetTick(NetTickMessage {
@@ -639,7 +616,9 @@ mod tests {
         });
 
         let res = algo.on_message(&msg, &state, &pstate, DemoTick::from(1)).unwrap();
-        assert!(res.is_empty(), "Orphaned wearable with mismatching account_id must be ignored and not cause conflict");
+        assert!(
+            res.is_empty(),
+            "Orphaned wearable with mismatching account_id must be ignored and not cause conflict"
+        );
     }
 }
-

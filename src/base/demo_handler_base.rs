@@ -70,7 +70,7 @@ impl<T: DemoHandlerAnalyser> CheatDemoHandler<T> {
         self.analyser.handle_header(header);
     }
 
-    pub fn handle_packet(&mut self, packet: Packet<'a>) -> Result<()> {
+    pub fn handle_packet(&mut self, packet: Packet) -> Result<()> {
         match packet {
             Packet::DataTables(packet) => {
                 self.handle_data_table(packet.tables, packet.server_classes)?;
@@ -103,7 +103,7 @@ impl<T: DemoHandlerAnalyser> CheatDemoHandler<T> {
         Ok(())
     }
 
-    fn handle_string_table(&mut self, table: StringTable<'a>) {
+    fn handle_string_table(&mut self, table: StringTable) {
         self.state_handler.handle_string_table_meta(table.get_table_meta());
         for (entry_index, entry) in table.entries.into_iter() {
             let entry_index = entry_index as usize;
@@ -114,7 +114,7 @@ impl<T: DemoHandlerAnalyser> CheatDemoHandler<T> {
         self.string_table_names.push(table.name.into());
     }
 
-    fn handle_table_update(&mut self, table_id: u8, entries: Vec<(u16, StringTableEntry<'a>)>) {
+    fn handle_table_update(&mut self, table_id: u8, entries: Vec<(u16, StringTableEntry)>) {
         if let Some(table_name) = self.string_table_names.get(table_id as usize) {
             for (index, entry) in entries {
                 let index = index as usize;
@@ -129,7 +129,7 @@ impl<T: DemoHandlerAnalyser> CheatDemoHandler<T> {
         self.state_handler.handle_data_table(&send_tables, server_classes)
     }
 
-    pub fn handle_message(&mut self, message: Message<'a>, tick: DemoTick) {
+    pub fn handle_message(&mut self, message: Message, tick: DemoTick) {
         let message_type = message.get_message_type();
         if T::does_handle(message_type) {
             self.analyser.handle_message(&message, tick, &self.state_handler);

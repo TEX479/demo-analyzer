@@ -24,22 +24,19 @@ pub struct JankGuard {
 }
 
 impl JankGuard {
-    pub fn teleported(&self, player: &u64, tick: u32) -> u32 {
-        tick.saturating_sub(self
-            .player_data
-            .get(player)
-            .map_or(0, |pd| pd.last_teleport))
+    pub fn teleported(&self, player: &SteamID, tick: u32) -> u32 {
+        tick.saturating_sub(self.player_data.get(player).map_or(0, |pd| pd.last_teleport))
     }
 
-    pub fn spawned(&self, player: &u64, tick: u32) -> u32 {
+    pub fn spawned(&self, player: &SteamID, tick: u32) -> u32 {
         tick.saturating_sub(self.player_data.get(player).map_or(0, |pd| pd.last_spawn))
     }
 
-    pub fn fired(&self, player: &u64, tick: u32) -> u32 {
+    pub fn fired(&self, player: &SteamID, tick: u32) -> u32 {
         tick.saturating_sub(self.player_data.get(player).map_or(0, |pd| pd.last_fire))
     }
 
-    pub fn set_last_fire(&mut self, player: u64, tick: u32) {
+    pub fn set_last_fire(&mut self, player: SteamID, tick: u32) {
         self.player_data.entry(player).or_default().last_fire = tick;
     }
 

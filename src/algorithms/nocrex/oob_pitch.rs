@@ -6,7 +6,7 @@ use crate::{
         algorithm::{CheatAlgorithm, Detection},
         parameters::{Parameter, Parameters, get_parameter_value},
     },
-    util::helpers::valid_players,
+    util::helpers::player_finders::valid_players,
 };
 use anyhow::Error;
 use serde_json::json;

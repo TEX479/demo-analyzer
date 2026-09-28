@@ -7,7 +7,7 @@ use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-use crate::util::helpers::{ViewAngle, viewangle_delta};
+use crate::util::helpers::geometry::{ViewAngle, viewangle_delta};
 use anyhow::{Context, Error};
 use tf_demo_parser::ParserState;
 

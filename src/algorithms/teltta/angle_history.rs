@@ -6,7 +6,7 @@ use crate::{
         parameters::{Parameter, Parameters, get_parameter_value},
     },
     util::{
-        helpers::{KeyValueVec, ViewAngle, valid_players},
+        helpers::{KeyValueVec, ViewAngle, player_finders::valid_players},
         nocrex::jankguard::JankGuard,
     },
 };

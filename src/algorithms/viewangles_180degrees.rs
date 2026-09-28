@@ -1,7 +1,7 @@
 use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::algorithm::{CheatAlgorithm, Detection},
-    util::helpers::{KeyValueVec, ViewAngle, valid_players, viewangle_delta},
+    util::helpers::{KeyValueVec, ViewAngle, geometry::viewangle_delta, player_finders::valid_players},
 };
 use anyhow::Error;
 use serde_json::json;

@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
-use tf_demo_parser::demo::message::packetentities::EntityId;
 use tf_demo_parser::demo::message::Message;
+use tf_demo_parser::demo::message::packetentities::EntityId;
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
-use crate::util::helpers::{handle_to_entid, viewangle_delta};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::util::helpers::geometry::viewangle_delta;
+use crate::util::helpers::{ViewAngle, handle_to_entid};
 use crate::util::nocrex::jankguard::JankGuard;
 
 #[derive(Clone, Copy, Debug)]
@@ -85,11 +86,7 @@ fn get_weapon_spread_info(weapon_id: Option<u32>, weapon_name: &str, class_name:
         });
     }
 
-    if weapon_name.contains("SMG")
-        || weapon_name.contains("Cleaner's Carbine")
-        || class_name == "CTFSMG"
-        || class_name == "sniper"
-    {
+    if weapon_name.contains("SMG") || weapon_name.contains("Cleaner's Carbine") || class_name == "CTFSMG" || class_name == "sniper" {
         return Some(WeaponSpreadInfo {
             category_id: 16,
             name: "SMG",
@@ -248,7 +245,8 @@ fn p_value_from_t(t: f64) -> f64 {
     (2.0 * cdf_tail).clamp(0.0, 1.0)
 }
 
-fn resolve_player_sid(player_raw: u32, state: &CheatAnalyserState) -> Option<u64> {
+// TODO: refactor / check if this is already implemented somewhere
+fn resolve_player_sid(player_raw: u32, state: &CheatAnalyserState) -> Option<SteamID> {
     let ent_ids = [
         EntityId::from(player_raw + 1),
         EntityId::from(player_raw),
@@ -264,7 +262,7 @@ fn resolve_player_sid(player_raw: u32, state: &CheatAnalyserState) -> Option<u64
         if let Some(player) = state.players.iter().find(|p| p.entity == ent_id) {
             if let Some(info) = &player.info {
                 if let Ok(sid) = SteamID::from_steam3(&info.steam_id) {
-                    return Some(u64::from(sid));
+                    return Some(sid);
                 }
             }
         }
@@ -272,17 +270,19 @@ fn resolve_player_sid(player_raw: u32, state: &CheatAnalyserState) -> Option<u64
     None
 }
 
+pub type Tick = u32;
+
 #[derive(Clone, Debug)]
 struct ReversalEvent {
-    tick: u32,
+    tick: Tick,
     magnitude: f32,
 }
 
 #[derive(Default, Clone)]
 struct PlayerTracker {
-    last_flag_tick: u32,
+    last_flag_tick: Tick,
     reversals: Vec<ReversalEvent>,
-    shot_samples: Vec<(u32, (f32, f32), Option<i32>, Option<f32>)>, // tick, delta, seed, spread
+    shot_samples: Vec<(Tick, (f32, f32), Option<i32>, Option<f32>)>, // tick, delta, seed, spread
     current_weapon: Option<WeaponSpreadInfo>,
 }
 
@@ -290,21 +290,15 @@ struct PlayerTracker {
 pub struct NoSpread {
     params: Parameters,
     jg: JankGuard,
-    prev_players: HashMap<u64, (f32, f32, u32)>, // pitch, yaw, tick
-    player_tick_deltas: HashMap<u64, HashMap<u32, (f32, f32)>>, // sid -> tick -> (dp, dy)
-    player_trackers: HashMap<u64, PlayerTracker>,
-    fire_events: HashMap<u64, Vec<(u32, Option<i32>, Option<f32>, Option<u32>)>>, // (tick, seed, spread, weapon_id)
+    prev_players: HashMap<SteamID, (ViewAngle, Tick)>,
+    player_tick_deltas: HashMap<SteamID, HashMap<Tick, (f32, f32)>>, // sid -> tick -> (dp, dy)
+    player_trackers: HashMap<SteamID, PlayerTracker>,
+    fire_events: HashMap<SteamID, Vec<(Tick, Option<i32>, Option<f32>, Option<u32>)>>, // (tick, seed, spread, weapon_id)
     detections: Vec<Detection>,
 }
 
 impl PlayerTracker {
-    fn check_seed_correlation(
-        &mut self,
-        player_sid: u64,
-        tick: u32,
-        min_shots: usize,
-        min_seed_correlation: f32,
-    ) -> Option<Detection> {
+    fn check_seed_correlation(&mut self, player_sid: SteamID, tick: u32, min_shots: usize, min_seed_correlation: f32) -> Option<Detection> {
         if self.shot_samples.len() < min_shots {
             return None;
         }
@@ -408,8 +402,8 @@ impl NoSpread {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for NoSpread {
-    fn default(&self) -> bool {
+impl CheatAlgorithm for NoSpread {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
@@ -445,14 +439,10 @@ impl<'a> CheatAlgorithm<'a> for NoSpread {
             for event in &msg.events {
                 let class = &parser_state.server_classes[usize::from(event.class_id)].name;
                 if class.as_str() == "CTEFireBullets" {
-                    const BULLETS_PLAYER: SendPropIdentifier =
-                        SendPropIdentifier::new("DT_TEFireBullets", "m_iPlayer");
-                    const BULLETS_SEED: SendPropIdentifier =
-                        SendPropIdentifier::new("DT_TEFireBullets", "m_iSeed");
-                    const BULLETS_SPREAD: SendPropIdentifier =
-                        SendPropIdentifier::new("DT_TEFireBullets", "m_flSpread");
-                    const BULLETS_WEAPON: SendPropIdentifier =
-                        SendPropIdentifier::new("DT_TEFireBullets", "m_iWeaponID");
+                    const BULLETS_PLAYER: SendPropIdentifier = SendPropIdentifier::new("DT_TEFireBullets", "m_iPlayer");
+                    const BULLETS_SEED: SendPropIdentifier = SendPropIdentifier::new("DT_TEFireBullets", "m_iSeed");
+                    const BULLETS_SPREAD: SendPropIdentifier = SendPropIdentifier::new("DT_TEFireBullets", "m_flSpread");
+                    const BULLETS_WEAPON: SendPropIdentifier = SendPropIdentifier::new("DT_TEFireBullets", "m_iWeaponID");
 
                     let mut player_opt = None;
                     let mut seed_opt = None;
@@ -482,10 +472,7 @@ impl<'a> CheatAlgorithm<'a> for NoSpread {
                     if let Some(player_raw) = player_opt {
                         if let Some(sid) = resolve_player_sid(player_raw, state) {
                             let current_tick: u32 = tick.into();
-                            self.fire_events
-                                .entry(sid)
-                                .or_default()
-                                .push((current_tick, seed_opt, spread_opt, weapon_opt));
+                            self.fire_events.entry(sid).or_default().push((current_tick, seed_opt, spread_opt, weapon_opt));
                         }
                     }
                 }
@@ -495,73 +482,53 @@ impl<'a> CheatAlgorithm<'a> for NoSpread {
         Ok(vec![])
     }
 
-    fn on_tick(
-        &mut self,
-        state: &CheatAnalyserState,
-        _: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         self.jg.on_tick(state);
         let ticknum = u32::from(state.tick);
 
-        let min_shots_evaluated: i32 = get_parameter_value(&self.params, "min_shots_evaluated");
-        let min_seed_correlation: f32 = get_parameter_value(&self.params, "min_seed_correlation");
+        let min_shots_evaluated: i32 = get_parameter_value(&self.params, "min_shots_evaluated").context("\"min_shots_evaluated\" must be a valid value")?;
+        let min_seed_correlation: f32 = get_parameter_value(&self.params, "min_seed_correlation").context("\"min_seed_correlation\" must be a valid value")?;
         let spread_tolerance_margin: f32 =
-            get_parameter_value(&self.params, "spread_tolerance_margin");
+            get_parameter_value(&self.params, "spread_tolerance_margin").context("\"spread_tolerance_margin\" must be a valid value")?;
 
         let min_shots = (min_shots_evaluated.max(4)) as usize;
 
-        for player in state.players.iter().filter(|p| {
-            p.in_pvs
-                && p.state == PlayerState::Alive
-                && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-        }) {
+        for player in state
+            .players
+            .iter()
+            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
+        {
             let info = match &player.info {
                 Some(info) => info,
                 None => continue,
             };
 
-            let steam_id: u64 = match SteamID::from_steam3(&info.steam_id) {
-                Ok(sid) => u64::from(sid),
-                Err(_) => continue,
-            };
+            let Ok(steam_id) = SteamID::from_steam3(&info.steam_id) else { continue };
 
-            let ticks_since_event = self
-                .jg
-                .teleported(&steam_id, ticknum)
-                .min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
                 if ticks_since_event == 0 {
-                    self.detections
-                        .retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
+                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
                 }
-                self.prev_players.insert(steam_id, (player.pitch_angle, player.view_angle, ticknum));
+                self.prev_players.insert(steam_id, (player.into(), ticknum));
                 continue;
             }
 
-            let prev_angles = match self.prev_players.get(&steam_id) {
+            let (prev_angle, prev_tick) = match self.prev_players.get(&steam_id) {
                 Some(&p) => p,
                 None => {
-                    self.prev_players.insert(steam_id, (player.pitch_angle, player.view_angle, ticknum));
+                    self.prev_players.insert(steam_id, (player.into(), ticknum));
                     continue;
                 }
             };
 
-            if ticknum == prev_angles.2 + 1 {
-                let (va_delta, pa_delta) = viewangle_delta(
-                    player.view_angle,
-                    player.pitch_angle,
-                    prev_angles.1,
-                    prev_angles.0,
-                    1,
-                );
-                self.player_tick_deltas
-                    .entry(steam_id)
-                    .or_default()
-                    .insert(ticknum, (pa_delta, va_delta));
+            if ticknum == prev_tick + 1 {
+                let (va_delta, pa_delta) = viewangle_delta(player.into(), prev_angle, 1);
+                self.player_tick_deltas.entry(steam_id).or_default().insert(ticknum, (pa_delta, va_delta));
             }
 
-            self.prev_players.insert(steam_id, (player.pitch_angle, player.view_angle, ticknum));
+            self.prev_players.insert(steam_id, (player.into(), ticknum));
 
             // Process bullet fire events for this player
             if let Some(events) = self.fire_events.get(&steam_id) {
@@ -593,18 +560,11 @@ impl<'a> CheatAlgorithm<'a> for NoSpread {
 
                                         if cos_angle <= -0.65 && cancel_ratio <= 0.65 {
                                             // Confirmed micro-reversal
-                                            tracker.reversals.push(ReversalEvent {
-                                                tick: t,
-                                                magnitude: mag1,
-                                            });
+                                            tracker.reversals.push(ReversalEvent { tick: t, magnitude: mag1 });
 
                                             tracker.shot_samples.push((t, (dy1, dp1), seed, spread));
 
-                                            let recent_count = tracker
-                                                .reversals
-                                                .iter()
-                                                .filter(|r| ticknum.saturating_sub(r.tick) <= 600)
-                                                .count();
+                                            let recent_count = tracker.reversals.iter().filter(|r| ticknum.saturating_sub(r.tick) <= 600).count();
 
                                             let mean_mag: f32 = tracker
                                                 .reversals
@@ -657,12 +617,12 @@ impl<'a> CheatAlgorithm<'a> for NoSpread {
     }
 
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
-        let min_detections: i32 = get_parameter_value(&self.params, "min_detections");
+        let min_detections: i32 = get_parameter_value(&self.params, "min_detections").context("\"min_detections\" must be a valid value")?;
         if min_detections <= 1 {
             return Ok(self.detections.clone());
         }
 
-        let mut counts: HashMap<u64, usize> = HashMap::new();
+        let mut counts: HashMap<SteamID, usize> = HashMap::new();
         for det in &self.detections {
             *counts.entry(det.player).or_default() += 1;
         }
@@ -670,11 +630,7 @@ impl<'a> CheatAlgorithm<'a> for NoSpread {
         let filtered: Vec<Detection> = self
             .detections
             .iter()
-            .filter(|det| {
-                counts
-                    .get(&det.player)
-                    .map_or(false, |&c| c >= min_detections as usize)
-            })
+            .filter(|det| counts.get(&det.player).map_or(false, |&c| c >= min_detections as usize))
             .cloned()
             .collect();
 
@@ -690,18 +646,20 @@ mod tests {
     #[test]
     fn test_min_detections_filtering() {
         let mut algo = NoSpread::new();
+        let sid1 = SteamID::from(11111u64);
+        let sid2 = SteamID::from(22222u64);
 
         // Player 1 has 2 detections (below default threshold of 3)
         algo.detections.push(Detection {
             tick: 100,
             algorithm: "fidoo/nospread".to_string(),
-            player: 11111,
+            player: sid1,
             data: json!({"type": "MicroJitterReversal"}),
         });
         algo.detections.push(Detection {
             tick: 200,
             algorithm: "fidoo/nospread".to_string(),
-            player: 11111,
+            player: sid1,
             data: json!({"type": "MicroJitterReversal"}),
         });
 
@@ -709,29 +667,31 @@ mod tests {
         algo.detections.push(Detection {
             tick: 150,
             algorithm: "fidoo/nospread".to_string(),
-            player: 22222,
+            player: sid2,
             data: json!({"type": "MicroJitterReversal"}),
         });
         algo.detections.push(Detection {
             tick: 250,
             algorithm: "fidoo/nospread".to_string(),
-            player: 22222,
+            player: sid2,
             data: json!({"type": "MicroJitterReversal"}),
         });
         algo.detections.push(Detection {
             tick: 350,
             algorithm: "fidoo/nospread".to_string(),
-            player: 22222,
+            player: sid2,
             data: json!({"type": "MicroJitterReversal"}),
         });
 
         let finished = algo.finish().unwrap();
         assert_eq!(finished.len(), 3);
-        assert!(finished.iter().all(|d| d.player == 22222));
+        assert!(finished.iter().all(|d| d.player == sid2));
     }
 
     #[test]
     fn test_min_detections_custom_param() {
+        let sid1 = SteamID::from(11111u64);
+
         let mut algo = NoSpread::new();
         if let Some(params) = algo.params() {
             params.insert("min_detections".to_string(), Parameter::Int(1));
@@ -740,12 +700,12 @@ mod tests {
         algo.detections.push(Detection {
             tick: 100,
             algorithm: "fidoo/nospread".to_string(),
-            player: 11111,
+            player: sid1,
             data: json!({"type": "MicroJitterReversal"}),
         });
 
         let finished = algo.finish().unwrap();
         assert_eq!(finished.len(), 1);
-        assert_eq!(finished[0].player, 11111);
+        assert_eq!(finished[0].player, sid1);
     }
 }

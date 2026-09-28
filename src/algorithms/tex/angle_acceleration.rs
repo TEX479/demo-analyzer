@@ -276,10 +276,10 @@ impl CheatAlgorithm for AngleAccelerationAnalyzer {
 
         let threshold = self
             .get_parameter_float(PARAMETER_THRESHOLD)
-            .expect("threshold must exist and be of the correct type");
+            .context("threshold must exist and be of the correct type")?;
         let max_fire_delay = self
             .get_parameter_int(PARAMETER_MAX_FIRE_DELAY)
-            .expect("max_fire_delay must exist and be of the correct type") as u32;
+            .context("max_fire_delay must exist and be of the correct type")? as u32;
 
         let mut handled_steam_ids: Vec<SteamID> = Vec::new();
         let mut detections = Vec::new();

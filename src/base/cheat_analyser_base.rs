@@ -419,9 +419,9 @@ impl CheatAnalyserState {
 
     pub fn get_player_class_and_weapon_by_sid(&self, sid: u64) -> (&'static str, String) {
         if let Some(player) = self.players.iter().find(|p| {
-            p.info.as_ref().is_some_and(|info| {
-                SteamID::from_steam3(&info.steam_id).map(u64::from).ok() == Some(sid)
-            })
+            p.info
+                .as_ref()
+                .is_some_and(|info| SteamID::from_steam3(&info.steam_id).map(u64::from).ok() == Some(sid))
         }) {
             (player.class_name(), self.get_player_weapon(player))
         } else {
@@ -690,14 +690,14 @@ impl BorrowMessageHandler for CheatAnalyser {
     }
 }
 
-impl crate::base::demo_handler_base::DemoHandlerAnalyser for CheatAnalyser<'_> {
+impl crate::base::demo_handler_base::DemoHandlerAnalyser for CheatAnalyser {
     fn handle_user_cmd(&mut self, packet: tf_demo_parser::demo::packet::usercmd::UserCmdPacket) {
         self.state.user_cmds.push(packet);
     }
 }
 
-impl<'a> CheatAnalyser<'a> {
-    pub fn new(algorithms: Vec<Box<dyn CheatAlgorithm<'a> + 'a + Send>>) -> Self {
+impl CheatAnalyser {
+    pub fn new(algorithms: Vec<Box<dyn CheatAlgorithm + Send>>) -> Self {
         let mut message_types = HANDLED_MESSAGE_TYPES.lock().expect("the HANDLED_MESSAGE_TYPES mutex must be lockable");
         // Figure out what message types we're going to be using.
         let mut specified_message_types: Vec<MessageType> = vec![];
@@ -756,7 +756,7 @@ impl<'a> CheatAnalyser<'a> {
         self.detections.sort_by(|a, b| {
             a.tick
                 .cmp(&b.tick)
-                .then_with(|| a.player.cmp(&b.player))
+                .then_with(|| u64::from(a.player).cmp(&u64::from(b.player)))
                 .then_with(|| a.algorithm.cmp(&b.algorithm))
         });
         Ok(())
@@ -828,10 +828,7 @@ impl<'a> CheatAnalyser<'a> {
         let tick: u32 = self.tick.into();
         let total_ticks = self.get_header_tick_count_u32();
 
-        if self.worker_id < crate::MAX_WORKERS {
-            crate::WORKER_TICKS[self.worker_id].store(tick, std::sync::atomic::Ordering::Relaxed);
-        }
-        if total_ticks > 0 {
+        if let Some(total_ticks) = total_ticks {
             crate::PROGRESS_TOTAL.store(total_ticks, std::sync::atomic::Ordering::Relaxed);
         }
         crate::PROGRESS_CURRENT.store(tick, std::sync::atomic::Ordering::Relaxed);
@@ -1236,28 +1233,19 @@ impl<'a> CheatAnalyser<'a> {
     fn parse_user_info(&mut self, index: usize, text: Option<&str>, data: Option<Stream>) -> ReadResult<()> {
         if let Some(user_info) = tf_demo_parser::demo::data::UserInfo::parse_from_string_table(index as u16, text, data)? {
             let ent_id = user_info.entity_id;
-            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id); 
-            self.state
-                .friends_ids
-                .insert(ent_id, user_info.player_info.friends_id);
-            self.state
-                .custom_files
-                .insert(ent_id, user_info.player_info.custom_file);
-            self.state
-                .set_entid_to_userid(ent_id, user_info.player_info.user_id.clone());
+            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id);
+            self.state.friends_ids.insert(ent_id, user_info.player_info.friends_id);
+            self.state.custom_files.insert(ent_id, user_info.player_info.custom_file);
+            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id.clone());
             if let Ok(steam_id) = SteamID::from_steam3(&user_info.player_info.steam_id) {
                 self.state.set_userid_to_id64(user_info.player_info.user_id, steam_id);
 
                 let id64: u64 = steam_id.into();
 
                 if !user_info.player_info.name.is_empty() {
-                    self.state
-                        .player_names
-                        .insert(id64, user_info.player_info.name.clone());
+                    self.state.player_names.insert(id64, user_info.player_info.name.clone());
                 }
-                self.state
-                    .user_info_history
-                    .insert(id64, user_info.clone().into());
+                self.state.user_info_history.insert(id64, user_info.clone().into());
             }
             self.state.get_or_create_player(ent_id).info = Some(user_info.into());
         }

@@ -2,7 +2,7 @@
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-use crate::util::helpers::valid_player;
+use crate::util::helpers::player_finders::player_with_sid;
 use anyhow::Error;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -87,12 +87,12 @@ impl CheatAlgorithm for BackTrack {
 
             let players = &state.players;
 
-            let Some((attacker, _attacker_userinfo)) = valid_player(players.iter(), attacker_sid) else {
+            let Some((attacker, _attacker_userinfo)) = player_with_sid(players.iter(), attacker_sid) else {
                 return Ok(vec![]);
             };
             let attacker_pos = attacker.position;
 
-            let Some((victim, _victim_userinfo)) = valid_player(players.iter(), victim_sid) else {
+            let Some((victim, _victim_userinfo)) = player_with_sid(players.iter(), victim_sid) else {
                 return Ok(vec![]);
             };
             let victim_pos = victim.position;

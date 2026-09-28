@@ -1,15 +1,16 @@
 use std::collections::{HashMap, VecDeque};
 
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
-use tf_demo_parser::demo::vector::Vector;
 use tf_demo_parser::ParserState;
+use tf_demo_parser::demo::vector::Vector;
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
-use crate::util::helpers::angle_delta;
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::util::helpers::ViewAngle;
+use crate::util::helpers::player_finders::valid_players;
 use crate::util::nocrex::jankguard::JankGuard;
 
 const TELEPORT_DIST_SQ: f32 = 256.0 * 256.0;
@@ -19,8 +20,7 @@ struct PlayerSnapshot {
     tick: u32,
     simtime: u16,
     position: Vector,
-    view_angle: f32,
-    pitch_angle: f32,
+    angle: ViewAngle,
 }
 
 #[derive(Default)]
@@ -43,7 +43,7 @@ enum WeaponCategory {
 
 #[derive(Default)]
 pub struct SilentAim {
-    player_states: HashMap<u64, PlayerHistoryState>,
+    player_states: HashMap<SteamID, PlayerHistoryState>,
     jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
@@ -53,7 +53,6 @@ impl SilentAim {
     pub fn new() -> Self {
         Self {
             params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
                 ("tick_window".to_string(), Parameter::Int(4)),
                 ("max_delta_first_third".to_string(), Parameter::Float(2.2)),
                 ("min_delta_second_third".to_string(), Parameter::Float(8.0)),
@@ -239,23 +238,14 @@ impl SilentAim {
     #[inline]
     fn is_pitch_command_flip(pitch_a: f32, pitch_b: f32) -> bool {
         let pitch_diff = (pitch_a - pitch_b).abs();
-        pitch_diff > 120.0
-            && pitch_a.abs() > 75.0
-            && pitch_b.abs() > 75.0
-            && (pitch_a * pitch_b < 0.0)
+        pitch_diff > 120.0 && pitch_a.abs() > 75.0 && pitch_b.abs() > 75.0 && (pitch_a * pitch_b < 0.0)
     }
 
     /// Verifies if fire checking can be bypassed for non-bullet weapons with strong geometric evidence.
     /// In TF2, Hitscan (CTEFireBullets / CTEPlayerAnimEvent), Melee (CTEPlayerAnimEvent / PlayerHurt),
     /// and Projectile weapons (CTEPlayerAnimEvent on launch) emit firing messages.
     /// Only Sapper placement lacks attack animation and bullet events.
-    fn should_skip_fire_check(
-        weapon_category: WeaponCategory,
-        is_exact: bool,
-        ratio: f32,
-        _peak_delta: f32,
-        _delta_0_i: f32,
-    ) -> bool {
+    fn should_skip_fire_check(weapon_category: WeaponCategory, is_exact: bool, ratio: f32, _peak_delta: f32, _delta_0_i: f32) -> bool {
         // Only Sapper placement does not emit attack animation or bullet events
         if weapon_category != WeaponCategory::Sapper {
             return false;
@@ -267,12 +257,7 @@ impl SilentAim {
 
     /// Specifically identifies downward rocket jumps (Soldier + Rocket Launcher + downward pitch floor > 20°).
     /// Prevents false exclusions for Scout/Sniper/Spy high-ground combat.
-    fn is_rocket_jump_context(
-        class_name: &str,
-        weapon_name: &str,
-        curr_pitch: f32,
-        anchor_pitch: f32,
-    ) -> bool {
+    fn is_rocket_jump_context(class_name: &str, weapon_name: &str, curr_pitch: f32, anchor_pitch: f32) -> bool {
         if class_name == "soldier" {
             let lw = weapon_name.to_lowercase();
             if lw.contains("rocket")
@@ -292,8 +277,8 @@ impl SilentAim {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for SilentAim {
-    fn default(&self) -> bool {
+impl CheatAlgorithm for SilentAim {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
@@ -330,52 +315,38 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
         Ok(vec![])
     }
 
-    fn on_tick(
-        &mut self,
-        state: &CheatAnalyserState,
-        _: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         self.jg.on_tick(state);
         let ticknum = u32::from(state.tick);
         let algo_name = self.algorithm_name().to_string();
 
-        let enabled = get_parameter_value::<bool>(&self.params, "enabled");
-        if !enabled {
-            return Ok(vec![]);
-        }
-
-        let tick_window = get_parameter_value::<i32>(&self.params, "tick_window").max(2) as usize;
+        let tick_window = get_parameter_value::<i32>(&self.params, "tick_window")
+            .context("\"tick_window\" has to be a valid value")?
+            .max(2) as usize;
         let max_delta_first_third =
-            get_parameter_value::<f32>(&self.params, "max_delta_first_third");
+            get_parameter_value::<f32>(&self.params, "max_delta_first_third").context("\"max_delta_first_third\" has to be a valid value")?;
         let min_delta_second_third =
-            get_parameter_value::<f32>(&self.params, "min_delta_second_third");
-        let min_ratio = get_parameter_value::<f32>(&self.params, "min_ratio");
-        let exact_match_epsilon =
-            get_parameter_value::<f32>(&self.params, "exact_match_epsilon");
-        let suspicion_threshold =
-            get_parameter_value::<i32>(&self.params, "suspicion_threshold").max(1) as u32;
-        let min_pvs_ticks =
-            get_parameter_value::<i32>(&self.params, "min_pvs_ticks").max(1) as u32;
-        let require_fire = get_parameter_value::<bool>(&self.params, "require_fire");
-        let fire_sync_ticks =
-            get_parameter_value::<i32>(&self.params, "fire_sync_ticks").max(1) as u32;
-        let clean_ticks_to_reset =
-            get_parameter_value::<i32>(&self.params, "clean_ticks_to_reset").max(1) as u32;
+            get_parameter_value::<f32>(&self.params, "min_delta_second_third").context("\"min_delta_second_third\" has to be a valid value")?;
+        let min_ratio = get_parameter_value::<f32>(&self.params, "min_ratio").context("\"min_ratio\" has to be a valid value")?;
+        let exact_match_epsilon = get_parameter_value::<f32>(&self.params, "exact_match_epsilon").context("\"exact_match_epsilon\" has to be a valid value")?;
+        let suspicion_threshold = get_parameter_value::<i32>(&self.params, "suspicion_threshold")
+            .context("\"suspicion_threshold\" has to be a valid value")?
+            .max(1) as u32;
+        let min_pvs_ticks = get_parameter_value::<i32>(&self.params, "min_pvs_ticks")
+            .context("\"min_pvs_ticks\" has to be a valid value")?
+            .max(1) as u32;
+        let require_fire = get_parameter_value::<bool>(&self.params, "require_fire").context("\"require_fire\" has to be a valid value")?;
+        let fire_sync_ticks = get_parameter_value::<i32>(&self.params, "fire_sync_ticks")
+            .context("\"fire_sync_ticks\" has to be a valid value")?
+            .max(1) as u32;
+        let clean_ticks_to_reset = get_parameter_value::<i32>(&self.params, "clean_ticks_to_reset")
+            .context("\"clean_ticks_to_reset\" has to be a valid value")?
+            .max(1) as u32;
 
-        let mut current_active_sids = Vec::new();
+        let mut current_active_sids: Vec<SteamID> = Vec::new();
         let mut tick_detections = Vec::new();
 
-        for player in &state.players {
-            let Some(info) = &player.info else {
-                continue;
-            };
-            if info.steam_id == "BOT" {
-                continue;
-            }
-            let Ok(steam_id) = SteamID::from_steam3(&info.steam_id).map(u64::from) else {
-                continue;
-            };
-
+        for (player, _info, steam_id) in valid_players(state.players.iter()) {
             current_active_sids.push(steam_id);
             let pstate = self.player_states.entry(steam_id).or_default();
 
@@ -396,24 +367,18 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
             pstate.last_update_tick = ticknum;
 
             // JankGuard spawn/teleport immunity check (60 ticks)
-            let ticks_since_event = self
-                .jg
-                .teleported(&steam_id, ticknum)
-                .min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
                 if ticks_since_event == 0 {
-                    self.detections
-                        .retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
+                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
                 }
                 pstate.history.clear();
                 continue;
             }
 
             // Suspicion decay: decay count if player has been clean for clean_ticks_to_reset
-            if pstate.last_suspicious_tick > 0
-                && ticknum.saturating_sub(pstate.last_suspicious_tick) >= clean_ticks_to_reset
-            {
+            if pstate.last_suspicious_tick > 0 && ticknum.saturating_sub(pstate.last_suspicious_tick) >= clean_ticks_to_reset {
                 pstate.suspicion_count = 0;
             }
 
@@ -427,8 +392,7 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
                 tick: ticknum,
                 simtime: player.simtime,
                 position: player.position,
-                view_angle: player.view_angle,
-                pitch_angle: player.pitch_angle,
+                angle: player.into(),
             };
 
             pstate.history.push_front(snapshot);
@@ -442,7 +406,7 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
             }
 
             let curr_snap = &pstate.history[0];
-            let current_angle = (curr_snap.view_angle, curr_snap.pitch_angle);
+            let current_angle = curr_snap.angle;
 
             // Classify weapon
             let weapon_name = state.get_player_weapon(player);
@@ -463,7 +427,7 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
 
             for i in 2..=max_lookback {
                 let anchor_snap = &pstate.history[i];
-                let anchor_angle = (anchor_snap.view_angle, anchor_snap.pitch_angle);
+                let anchor_angle = anchor_snap.angle;
 
                 // Verify the total window duration is within silent aimbot flick time (<= 8 ticks)
                 if curr_snap.tick.saturating_sub(anchor_snap.tick) > 8 {
@@ -497,28 +461,26 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
                 }
 
                 // Exclude quantized pitch baseline glitches
-                if Self::is_quantized_pitch_glitch(curr_snap.pitch_angle)
-                    || Self::is_quantized_pitch_glitch(anchor_snap.pitch_angle)
-                {
+                if Self::is_quantized_pitch_glitch(curr_snap.angle.pitch) || Self::is_quantized_pitch_glitch(anchor_snap.angle.pitch) {
                     continue;
                 }
 
                 // Exclude console command pitch flipping (+lookup; +lookdown) on baseline
-                if Self::is_pitch_command_flip(curr_snap.pitch_angle, anchor_snap.pitch_angle) {
+                if Self::is_pitch_command_flip(curr_snap.angle.pitch, anchor_snap.angle.pitch) {
                     continue;
                 }
 
                 // Specifically filter downward rocket jumping (Soldier + Rocket Launcher + pitch > 65°)
-                if Self::is_rocket_jump_context(class_name, &weapon_name, curr_snap.pitch_angle, anchor_snap.pitch_angle) {
+                if Self::is_rocket_jump_context(class_name, &weapon_name, curr_snap.angle.pitch, anchor_snap.angle.pitch) {
                     continue;
                 }
 
                 // Return delta between current angle (t) and anchor angle (t - i)
-                let delta_0_i = angle_delta(current_angle, anchor_angle);
+                let delta_0_i = current_angle.delta(anchor_angle);
 
                 // Check exact angle match (zero drift or within float quantization epsilon)
-                let is_exact = delta_0_i <= exact_match_epsilon
-                    || (curr_snap.view_angle == anchor_snap.view_angle && curr_snap.pitch_angle == anchor_snap.pitch_angle);
+                let is_exact =
+                    delta_0_i <= exact_match_epsilon || (curr_snap.angle.yaw == anchor_snap.angle.yaw && curr_snap.angle.pitch == anchor_snap.angle.pitch);
 
                 if !is_exact && delta_0_i > max_delta_first_third {
                     continue;
@@ -527,23 +489,23 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
                 // Intermediate spike check: at least one tick strictly between 0 and i must have spiked
                 for m in 1..i {
                     let mid_snap = &pstate.history[m];
-                    let mid_angle = (mid_snap.view_angle, mid_snap.pitch_angle);
+                    let mid_angle = mid_snap.angle;
 
                     // Skip quantized pitch glitch on intermediate snapshot
-                    if Self::is_quantized_pitch_glitch(mid_snap.pitch_angle) {
+                    if Self::is_quantized_pitch_glitch(mid_snap.angle.pitch) {
                         continue;
                     }
 
                     // Skip extreme engine pitch clamp or console command pitch flips (+lookup; +lookdown)
-                    if Self::is_extreme_pitch_clamp(mid_snap.pitch_angle)
-                        || Self::is_pitch_command_flip(curr_snap.pitch_angle, mid_snap.pitch_angle)
-                        || Self::is_pitch_command_flip(anchor_snap.pitch_angle, mid_snap.pitch_angle)
+                    if Self::is_extreme_pitch_clamp(mid_snap.angle.pitch)
+                        || Self::is_pitch_command_flip(curr_snap.angle.pitch, mid_snap.angle.pitch)
+                        || Self::is_pitch_command_flip(anchor_snap.angle.pitch, mid_snap.angle.pitch)
                     {
                         continue;
                     }
 
-                    let mid_delta_curr = angle_delta(current_angle, mid_angle);
-                    let mid_delta_anchor = angle_delta(anchor_angle, mid_angle);
+                    let mid_delta_curr = current_angle.delta(mid_angle);
+                    let mid_delta_anchor = anchor_angle.delta(mid_angle);
                     let peak_delta = mid_delta_curr.max(mid_delta_anchor);
 
                     if peak_delta < min_delta_second_third {
@@ -551,11 +513,7 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
                     }
 
                     // Ratio check: excursion must be significantly larger than baseline drift
-                    let ratio = if delta_0_i > 0.0001 {
-                        peak_delta / delta_0_i
-                    } else {
-                        peak_delta / 0.0001
-                    };
+                    let ratio = if delta_0_i > 0.0001 { peak_delta / delta_0_i } else { peak_delta / 0.0001 };
 
                     let effective_min_ratio = match weapon_category {
                         WeaponCategory::Projectile => min_ratio.max(12.0),
@@ -568,13 +526,7 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
 
                     // Weapon fire check
                     if require_fire {
-                        let skip_fire = Self::should_skip_fire_check(
-                            weapon_category,
-                            is_exact,
-                            ratio,
-                            peak_delta,
-                            delta_0_i,
-                        );
+                        let skip_fire = Self::should_skip_fire_check(weapon_category, is_exact, ratio, peak_delta, delta_0_i);
 
                         if !skip_fire {
                             let ticks_since_fire = self.jg.fired(&steam_id, mid_snap.tick);
@@ -649,8 +601,7 @@ impl<'a> CheatAlgorithm<'a> for SilentAim {
         }
 
         // Clean up disconnected players
-        self.player_states
-            .retain(|sid, _| current_active_sids.contains(sid));
+        self.player_states.retain(|sid, _| current_active_sids.contains(sid));
 
         Ok(tick_detections)
     }
@@ -671,15 +622,7 @@ mod tests {
         ParserState::new(24, |_| false, false)
     }
 
-    fn create_test_player(
-        entity_id: u32,
-        user_id: u32,
-        steam_id: &str,
-        pos: Vector,
-        yaw: f32,
-        pitch: f32,
-        in_pvs: bool,
-    ) -> Player {
+    fn create_test_player(entity_id: u32, user_id: u32, steam_id: &str, pos: Vector, yaw: f32, pitch: f32, in_pvs: bool) -> Player {
         Player {
             entity: EntityId::from(entity_id),
             position: pos,
@@ -714,55 +657,30 @@ mod tests {
     #[test]
     fn test_exact_match_instant_flag() {
         let mut algo = SilentAim::new();
-        algo.params
-            .insert("require_fire".to_string(), Parameter::Bool(false));
+        algo.params.insert("require_fire".to_string(), Parameter::Bool(false));
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
         let steam_id_str = "[U:1:12345678]";
-        let sid = u64::from(SteamID::from_steam3(steam_id_str).unwrap());
+        let sid = SteamID::from_steam3(steam_id_str).unwrap();
         state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
         state.set_userid_to_id64(UserId::from(1u16), sid);
 
         // Pre-fill PVS grace ticks at base angle (45.0, 0.0)
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(
-                1,
-                1,
-                steam_id_str,
-                Vector { x: 0.0, y: 0.0, z: 0.0 },
-                45.0,
-                0.0,
-                true,
-            )];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Tick 105: Flick to (75.0, 15.0) -> peak delta > 30°
         state.tick = 105.into();
-        state.players = vec![create_test_player(
-            1,
-            1,
-            steam_id_str,
-            Vector { x: 0.0, y: 0.0, z: 0.0 },
-            75.0,
-            15.0,
-            true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         // Tick 106: Snap back to EXACT SAME (45.0, 0.0)
         state.tick = 106.into();
-        state.players = vec![create_test_player(
-            1,
-            1,
-            steam_id_str,
-            Vector { x: 0.0, y: 0.0, z: 0.0 },
-            45.0,
-            0.0,
-            true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
         let detections = algo.on_tick(&state, &parser_state).unwrap();
 
         // Exact match should flag immediately on first flick!
@@ -775,38 +693,30 @@ mod tests {
     #[test]
     fn test_drift_requires_suspicion_threshold() {
         let mut algo = SilentAim::new();
-        algo.params
-            .insert("require_fire".to_string(), Parameter::Bool(false));
-        algo.params
-            .insert("suspicion_threshold".to_string(), Parameter::Int(2));
+        algo.params.insert("require_fire".to_string(), Parameter::Bool(false));
+        algo.params.insert("suspicion_threshold".to_string(), Parameter::Int(2));
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
         let steam_id_str = "[U:1:12345678]";
-        let sid = u64::from(SteamID::from_steam3(steam_id_str).unwrap());
+        let sid = SteamID::from_steam3(steam_id_str).unwrap();
         state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
         state.set_userid_to_id64(UserId::from(1u16), sid);
 
         // Baseline
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(
-                1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true,
-            )];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Flick 1: Peak to 75.0, then snapback to 45.5 (drift = 0.5°)
         state.tick = 105.into();
-        state.players = vec![create_test_player(
-            1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         state.tick = 106.into();
-        state.players = vec![create_test_player(
-            1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
         let det1 = algo.on_tick(&state, &parser_state).unwrap();
         // 1st drift flick should NOT flag yet because suspicion_threshold = 2
         assert_eq!(det1.len(), 0);
@@ -814,23 +724,17 @@ mod tests {
         // Continue baseline
         for t in 107..110 {
             state.tick = t.into();
-            state.players = vec![create_test_player(
-                1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true,
-            )];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Flick 2: Peak to 80.0, then snapback to 45.9 (drift = 0.4°)
         state.tick = 110.into();
-        state.players = vec![create_test_player(
-            1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 80.0, 20.0, true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 80.0, 20.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         state.tick = 111.into();
-        state.players = vec![create_test_player(
-            1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.9, 0.0, true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.9, 0.0, true)];
         let det2 = algo.on_tick(&state, &parser_state).unwrap();
         // 2nd drift flick reaches threshold -> flags!
         assert_eq!(det2.len(), 1);
@@ -841,37 +745,30 @@ mod tests {
     #[test]
     fn test_high_pitch_scout_aim_not_filtered() {
         let mut algo = SilentAim::new();
-        algo.params
-            .insert("require_fire".to_string(), Parameter::Bool(false));
+        algo.params.insert("require_fire".to_string(), Parameter::Bool(false));
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
         let steam_id_str = "[U:1:12345678]";
-        let sid = u64::from(SteamID::from_steam3(steam_id_str).unwrap());
+        let sid = SteamID::from_steam3(steam_id_str).unwrap();
         state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
         state.set_userid_to_id64(UserId::from(1u16), sid);
 
         // Pre-fill at steep downward pitch (58.0°) - Scout shooting downward from high ground
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(
-                1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true,
-            )];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Flick to (65.0, 60.0) -> peak delta ~ 20°
         state.tick = 105.into();
-        state.players = vec![create_test_player(
-            1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 65.0, 60.0, true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 65.0, 60.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         // Snapback to exact (45.0, 58.0)
         state.tick = 106.into();
-        state.players = vec![create_test_player(
-            1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true,
-        )];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
         let detections = algo.on_tick(&state, &parser_state).unwrap();
 
         // Scout aiming downward from high ground MUST NOT be filtered!
@@ -948,27 +845,12 @@ mod tests {
     #[test]
     fn test_fire_check_requirements() {
         // Hitscan, Melee, and Projectiles must all verify attack/fire events
-        assert_eq!(
-            SilentAim::should_skip_fire_check(WeaponCategory::Melee, true, 100.0, 15.0, 0.0),
-            false
-        );
-        assert_eq!(
-            SilentAim::should_skip_fire_check(WeaponCategory::Hitscan, true, 100.0, 15.0, 0.0),
-            false
-        );
-        assert_eq!(
-            SilentAim::should_skip_fire_check(WeaponCategory::Projectile, true, 100.0, 15.0, 0.0),
-            false
-        );
+        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Melee, true, 100.0, 15.0, 0.0), false);
+        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Hitscan, true, 100.0, 15.0, 0.0), false);
+        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Projectile, true, 100.0, 15.0, 0.0), false);
 
         // Only Sapper with exact angle match and high ratio may skip fire check
-        assert_eq!(
-            SilentAim::should_skip_fire_check(WeaponCategory::Sapper, true, 50.0, 15.0, 0.0),
-            true
-        );
-        assert_eq!(
-            SilentAim::should_skip_fire_check(WeaponCategory::Sapper, false, 50.0, 15.0, 0.0),
-            false
-        );
+        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Sapper, true, 50.0, 15.0, 0.0), true);
+        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Sapper, false, 50.0, 15.0, 0.0), false);
     }
 }

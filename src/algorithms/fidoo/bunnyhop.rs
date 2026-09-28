@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
-use anyhow::Error;
+use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
-use tf_demo_parser::demo::vector::Vector;
 use tf_demo_parser::ParserState;
+use tf_demo_parser::demo::vector::Vector;
 
-use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
+use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::util::helpers::player_finders::valid_players;
 use crate::util::nocrex::jankguard::JankGuard;
 
 #[derive(Default, Clone)]
@@ -31,7 +32,7 @@ struct PlayerBhopState {
 }
 
 pub struct BunnyHop {
-    player_states: HashMap<u64, PlayerBhopState>,
+    player_states: HashMap<SteamID, PlayerBhopState>,
     jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
@@ -60,8 +61,8 @@ impl BunnyHop {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for BunnyHop {
-    fn default(&self) -> bool {
+impl CheatAlgorithm for BunnyHop {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
@@ -88,43 +89,21 @@ impl<'a> CheatAlgorithm<'a> for BunnyHop {
         Ok(vec![])
     }
 
-    fn on_tick(
-        &mut self,
-        state: &CheatAnalyserState,
-        _: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         self.jg.on_tick(state);
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
-        let min_streak: i32 = get_parameter_value(&self.params, "min_streak");
-        let min_air_ticks: i32 = get_parameter_value(&self.params, "min_air_ticks");
-        let max_ground_ticks: i32 =
-            get_parameter_value(&self.params, "max_ground_ticks_bhop");
-        let min_speed: f32 = get_parameter_value(&self.params, "min_speed");
+        let min_streak: i32 = get_parameter_value(&self.params, "min_streak").context("\"min_streak\" must be a valid value")?;
+        let min_air_ticks: i32 = get_parameter_value(&self.params, "min_air_ticks").context("\"min_air_ticks\" must be a valid value")?;
+        let max_ground_ticks: i32 = get_parameter_value(&self.params, "max_ground_ticks_bhop").context("\"max_ground_ticks_bhop\" must be a valid value")?;
+        let min_speed: f32 = get_parameter_value(&self.params, "min_speed").context("\"min_speed\" must be a valid value")?;
 
         let mut tick_detections = Vec::new();
         let algo_name = self.algorithm_name().to_string();
 
-        for player in players.iter().filter(|p| {
-            p.in_pvs
-                && p.state == PlayerState::Alive
-                && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT")
-        }) {
-            let info = match &player.info {
-                Some(info) => info,
-                None => continue,
-            };
-
-            let steam_id: u64 = match SteamID::from_steam3(&info.steam_id) {
-                Ok(sid) => u64::from(sid),
-                Err(_) => continue,
-            };
-
-            let ticks_since_event = self
-                .jg
-                .teleported(&steam_id, ticknum)
-                .min(self.jg.spawned(&steam_id, ticknum));
+        for (player, _info, steam_id) in valid_players(players.iter()) {
+            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             // Ignore detections within 60 ticks of spawn or teleport
             if ticks_since_event < 60 {
@@ -227,13 +206,8 @@ impl<'a> CheatAlgorithm<'a> for BunnyHop {
                             && pstate.hop_ground_ticks.iter().all(|&g| g <= max_ground_ticks as u32)
                         {
                             pstate.last_reported_streak = pstate.current_streak;
-                            let avg_speed = pstate.hop_speeds.iter().sum::<f32>()
-                                / pstate.hop_speeds.len() as f32;
-                            let max_speed = pstate
-                                .hop_speeds
-                                .iter()
-                                .cloned()
-                                .fold(0.0_f32, f32::max);
+                            let avg_speed = pstate.hop_speeds.iter().sum::<f32>() / pstate.hop_speeds.len() as f32;
+                            let max_speed = pstate.hop_speeds.iter().cloned().fold(0.0_f32, f32::max);
                             let detection = Detection {
                                 tick: ticknum,
                                 algorithm: algo_name.clone(),
@@ -277,13 +251,8 @@ impl<'a> CheatAlgorithm<'a> for BunnyHop {
                                 && pstate.hop_ground_ticks.iter().all(|&g| g <= max_ground_ticks as u32)
                             {
                                 pstate.last_reported_streak = pstate.current_streak;
-                                let avg_speed = pstate.hop_speeds.iter().sum::<f32>()
-                                    / pstate.hop_speeds.len() as f32;
-                                let max_speed = pstate
-                                    .hop_speeds
-                                    .iter()
-                                    .cloned()
-                                    .fold(0.0_f32, f32::max);
+                                let avg_speed = pstate.hop_speeds.iter().sum::<f32>() / pstate.hop_speeds.len() as f32;
+                                let max_speed = pstate.hop_speeds.iter().cloned().fold(0.0_f32, f32::max);
                                 let detection = Detection {
                                     tick: ticknum,
                                     algorithm: algo_name.clone(),
