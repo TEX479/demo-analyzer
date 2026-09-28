@@ -5,7 +5,7 @@ use crate::{
         algorithm::{CheatAlgorithm, Detection},
         parameters::{Parameter, Parameters, get_parameter_value},
     },
-    util::helpers::KeyValueVec,
+    util::helpers::{KeyValueVec, player_finders::player_with_uid},
 };
 use anyhow::Error;
 use serde_json::{Map, Value};
@@ -27,7 +27,6 @@ impl DoubleTap {
     pub fn new() -> Self {
         Self {
             params: HashMap::from([
-                ("assert_pvs".to_string(), Parameter::Bool(true)),
                 ("min_tick_scout".to_string(), Parameter::Int(17)),
                 ("min_tick_heavy".to_string(), Parameter::Int(3)),
             ]),
@@ -91,29 +90,12 @@ impl CheatAlgorithm for DoubleTap {
             let attacker_uid = UserId::from(hurt.attacker);
             let victim_uid = UserId::from(hurt.user_id);
 
-            // get steam id64 from uids
-            let Some(attacker_sid) = state.get_id64_from_userid(attacker_uid) else {
+            let Some((attacker, _attacker_info, attacker_sid)) = player_with_uid(players.iter(), attacker_uid) else {
                 return Ok(Vec::new());
             };
             let Some(victim_sid) = state.get_id64_from_userid(victim_uid) else {
                 return Ok(Vec::new());
             };
-
-            // maybe use `crate::util::helper::valid_players`, if `assert_pvs` option can be allowed to always be true
-            let Some(attacker) = players.iter().find(|x| {
-                x.info
-                    .as_ref()
-                    .is_some_and(|info| SteamID::from_steam3(&info.steam_id).unwrap_or_default() == attacker_sid)
-            }) else {
-                return Ok(vec![]);
-            };
-
-            if !attacker.in_pvs {
-                let assert_pvs = get_parameter_value::<bool>(&self.params, "assert_pvs")?;
-                if assert_pvs {
-                    return Ok(vec![]);
-                }
-            }
 
             let Some(past_shot) = self.shots.insert(
                 attacker_sid,

@@ -349,6 +349,7 @@ impl CheatAlgorithm for SilentAim {
             current_active_sids.push(steam_id);
             let pstate = self.player_states.entry(steam_id).or_default();
 
+            // TODO: make it so players not in pvs or not alive still get reset
             // PVS and Life state validation: player must be alive and in PVS
             if !player.in_pvs || player.state != PlayerState::Alive {
                 pstate.pvs_ticks = 0;

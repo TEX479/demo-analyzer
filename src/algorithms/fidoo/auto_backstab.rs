@@ -477,7 +477,9 @@ impl CheatAlgorithm for AutoBackstab {
                         let Some((attacker, _attacker_info, attacker_sid)) = player_with_uid(state.players.iter(), attacker_uid) else {
                             return Ok(Vec::new());
                         };
-                        let Some((victim, _victim_info, victim_sid)) = player_with_uid(state.players.iter(), victim_uid) else {
+                        // PERF: on paper, reversing the second search improves worst- (and best-) case speeds.
+                        //       if this does not hold up or the compiler can dom some weird stuff, remove.
+                        let Some((victim, _victim_info, victim_sid)) = player_with_uid(state.players.iter().rev(), victim_uid) else {
                             return Ok(Vec::new());
                         };
 

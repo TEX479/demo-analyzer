@@ -372,12 +372,12 @@ impl WeaponEntity {
     }
 }
 
+// TODO: check why there are hashmaps with redundant info
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct CheatAnalyserState {
     pub players: Vec<Player>,
-    // TODO: replace `u64`s with `SteamID`s
-    pub player_names: HashMap<u64, String>,
-    pub user_info_history: HashMap<u64, UserInfo>,
+    pub player_names: HashMap<SteamID, String>,
+    pub user_info_history: HashMap<SteamID, UserInfo>,
     pub entid_to_userid: HashMap<EntityId, UserId>,
     pub userid_to_id64: HashMap<UserId, SteamID>,
     pub buildings: BTreeMap<EntityId, Building>,
@@ -392,14 +392,14 @@ pub struct CheatAnalyserState {
 }
 
 impl CheatAnalyserState {
-    pub fn get_player_name(&self, sid: u64) -> Option<&str> {
+    pub fn get_player_name(&self, sid: SteamID) -> Option<&str> {
         if let Some(name) = self.player_names.get(&sid) {
             return Some(name.as_str());
         }
         for player in &self.players {
             if let Some(info) = &player.info
                 && let Ok(steam_id) = SteamID::from_steam3(&info.steam_id)
-                && u64::from(steam_id) == sid
+                && steam_id == sid
             {
                 return Some(info.name.as_str());
             }
@@ -487,7 +487,6 @@ pub struct CheatAnalyser {
     pub detections: Vec<Detection>,
     pub header: Option<Header>,
     pub tick: DemoTick,
-    pub worker_id: usize,
     last_progress_update_time: Instant,
     progress: Vec<u32>,
     class_names: Vec<ServerClassName>, // indexed by ClassId
@@ -501,7 +500,6 @@ impl Default for CheatAnalyser {
             detections: Default::default(),
             header: Default::default(),
             tick: Default::default(),
-            worker_id: 0,
             last_progress_update_time: Instant::now(),
             progress: Default::default(),
             class_names: Default::default(),
@@ -724,7 +722,6 @@ impl CheatAnalyser {
             detections: Vec::new(),
             header: None,
             tick: DemoTick::default(),
-            worker_id: 0,
             last_progress_update_time: Instant::now(),
             progress: vec![],
             class_names: Vec::new(),
@@ -1238,12 +1235,10 @@ impl CheatAnalyser {
             if let Ok(steam_id) = SteamID::from_steam3(&user_info.player_info.steam_id) {
                 self.state.set_userid_to_id64(user_info.player_info.user_id, steam_id);
 
-                let id64: u64 = steam_id.into();
-
                 if !user_info.player_info.name.is_empty() {
-                    self.state.player_names.insert(id64, user_info.player_info.name.clone());
+                    self.state.player_names.insert(steam_id, user_info.player_info.name.clone());
                 }
-                self.state.user_info_history.insert(id64, user_info.clone().into());
+                self.state.user_info_history.insert(steam_id, user_info.clone().into());
             }
             self.state.get_or_create_player(ent_id).info = Some(user_info.into());
         }

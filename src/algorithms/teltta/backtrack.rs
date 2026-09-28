@@ -92,7 +92,9 @@ impl CheatAlgorithm for BackTrack {
             };
             let attacker_pos = attacker.position;
 
-            let Some((victim, _victim_userinfo)) = player_with_sid(players.iter(), victim_sid) else {
+            // PERF: on paper, reversing the second search improves worst- (and best-) case speeds.
+            //       if this does not hold up or the compiler can dom some weird stuff, remove.
+            let Some((victim, _victim_userinfo)) = player_with_sid(players.iter().rev(), victim_sid) else {
                 return Ok(vec![]);
             };
             let victim_pos = victim.position;
