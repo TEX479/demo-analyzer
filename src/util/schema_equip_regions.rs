@@ -3,18 +3,72 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 pub const REGIONS: [&str; 66] = [
-    "Back", "arm_tattoos", "arms", "back", "beard", "belt_misc", "demo_belt",
-    "demo_eyepatch", "demo_head_replacement", "demoman_collar", "disconnected_floating_item",
-    "ears", "engineer_belt", "engineer_hair", "engineer_left_arm", "engineer_pocket",
-    "engineer_wings", "face", "feet", "flair", "glasses", "grenades", "hat",
-    "head_skin", "heavy_belt", "heavy_belt_back", "heavy_bullets", "heavy_hair",
-    "heavy_hip", "heavy_pocket", "heavy_towel", "left_shoulder", "lenses", "medal",
-    "medic_gloves", "medic_hip", "medic_pipe", "medigun_accessories", "necklace",
-    "pants", "pyro_head_replacement", "pyro_spikes", "pyro_tail", "pyro_wings",
-    "right_shoulder", "scout_backpack", "scout_bandages", "scout_hands", "scout_pants",
-    "scout_wings", "shirt", "sleeves", "sniper_bullets", "sniper_headband", "sniper_legs",
-    "sniper_pocket", "sniper_pocket_left", "sniper_quiver", "sniper_vest", "soldier_cigar",
-    "soldier_coat", "soldier_legs", "soldier_pocket", "spy_coat", "whole_head", "zombie_body"
+    "Back",
+    "arm_tattoos",
+    "arms",
+    "back",
+    "beard",
+    "belt_misc",
+    "demo_belt",
+    "demo_eyepatch",
+    "demo_head_replacement",
+    "demoman_collar",
+    "disconnected_floating_item",
+    "ears",
+    "engineer_belt",
+    "engineer_hair",
+    "engineer_left_arm",
+    "engineer_pocket",
+    "engineer_wings",
+    "face",
+    "feet",
+    "flair",
+    "glasses",
+    "grenades",
+    "hat",
+    "head_skin",
+    "heavy_belt",
+    "heavy_belt_back",
+    "heavy_bullets",
+    "heavy_hair",
+    "heavy_hip",
+    "heavy_pocket",
+    "heavy_towel",
+    "left_shoulder",
+    "lenses",
+    "medal",
+    "medic_gloves",
+    "medic_hip",
+    "medic_pipe",
+    "medigun_accessories",
+    "necklace",
+    "pants",
+    "pyro_head_replacement",
+    "pyro_spikes",
+    "pyro_tail",
+    "pyro_wings",
+    "right_shoulder",
+    "scout_backpack",
+    "scout_bandages",
+    "scout_hands",
+    "scout_pants",
+    "scout_wings",
+    "shirt",
+    "sleeves",
+    "sniper_bullets",
+    "sniper_headband",
+    "sniper_legs",
+    "sniper_pocket",
+    "sniper_pocket_left",
+    "sniper_quiver",
+    "sniper_vest",
+    "soldier_cigar",
+    "soldier_coat",
+    "soldier_legs",
+    "soldier_pocket",
+    "spy_coat",
+    "whole_head",
+    "zombie_body",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -31,10 +85,7 @@ pub struct CosmeticInfo {
 }
 
 pub fn is_weapon_wearable(id: u16) -> bool {
-    matches!(
-        id,
-        57 | 131 | 133 | 231 | 405 | 406 | 444 | 608 | 642 | 1099 | 1101 | 1144 | 1179 | 1180 | 1185
-    )
+    matches!(id, 57 | 131 | 133 | 231 | 405 | 406 | 444 | 608 | 642 | 1099 | 1101 | 1144 | 1179 | 1180 | 1185)
 }
 
 pub fn is_action_item(id: u16) -> bool {
@@ -66,7 +117,6 @@ lazy_static! {
         }
         m
     };
-
     static ref COSMETICS_MAP: HashMap<u16, CosmeticInfo> = {
         let raw_json = include_str!("../../cosmetics.json");
         let parsed: HashMap<String, RawCosmetic> = serde_json::from_str(raw_json).expect("Invalid cosmetics.json");
@@ -81,11 +131,14 @@ lazy_static! {
                         mask |= 1u128 << idx;
                     }
                 }
-                map.insert(id, CosmeticInfo {
-                    name: raw.name,
-                    regions,
-                    region_mask: mask,
-                });
+                map.insert(
+                    id,
+                    CosmeticInfo {
+                        name: raw.name,
+                        regions,
+                        region_mask: mask,
+                    },
+                );
             }
         }
         map
@@ -104,11 +157,7 @@ pub fn get_cosmetic_info(id: u16) -> Option<CosmeticInfo> {
 /// - Any shared equip region (e.g. Hat + Hat, Beard + Beard, Shirt + Shirt)
 /// - Glasses conflicts with: Face, Lenses, Whole Head (ignored if ignore_quickswitch is true)
 /// - Whole Head conflicts with: Hat, Face, Glasses (ignored if ignore_quickswitch is true)
-pub fn check_cosmetic_conflict(
-    info_a: &CosmeticInfo,
-    info_b: &CosmeticInfo,
-    ignore_quickswitch: bool,
-) -> Option<Vec<&'static str>> {
+pub fn check_cosmetic_conflict(info_a: &CosmeticInfo, info_b: &CosmeticInfo, ignore_quickswitch: bool) -> Option<Vec<&'static str>> {
     let direct_overlap = info_a.region_mask & info_b.region_mask;
     let mut conflicts = Vec::new();
 
@@ -123,14 +172,10 @@ pub fn check_cosmetic_conflict(
         // Glasses conflicts with: Face, Lenses, Whole Head
         if a_has("glasses") && (b_has("face") || b_has("lenses") || b_has("whole_head")) {
             conflicts.push("glasses");
-        } else if b_has("glasses") && (a_has("face") || a_has("lenses") || a_has("whole_head")) {
-            conflicts.push("glasses");
         }
 
         // Whole Head conflicts with: Hat, Face, Glasses
         if a_has("whole_head") && (b_has("hat") || b_has("face") || b_has("glasses")) {
-            conflicts.push("whole_head");
-        } else if b_has("whole_head") && (a_has("hat") || a_has("face") || a_has("glasses")) {
             conflicts.push("whole_head");
         }
     }
@@ -143,4 +188,3 @@ pub fn check_cosmetic_conflict(
         Some(conflicts)
     }
 }
-

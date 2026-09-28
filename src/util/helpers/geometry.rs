@@ -1,7 +1,6 @@
 use crate::base::cheat_analyser_base::Player;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use tf_demo_parser::demo::message::packetentities::EntityId;
 
 // Compute the difference in viewangles. We have to account for the fact viewangles are in a circle.
 // E.g. If viewangle goes from 350 to 10 degrees, we want to return 20 degrees.

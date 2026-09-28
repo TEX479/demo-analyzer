@@ -149,6 +149,7 @@ fn get_weapon_spread_info(weapon_id: Option<u32>, weapon_name: &str, class_name:
 }
 
 // Standard CUniformRandomStream PRNG
+#[derive(Default)]
 pub struct UniformRandomStream {
     m_idum: i32,
     m_iy: i32,
@@ -156,14 +157,6 @@ pub struct UniformRandomStream {
 }
 
 impl UniformRandomStream {
-    pub fn new() -> Self {
-        Self {
-            m_idum: 0,
-            m_iy: 0,
-            m_iv: [0; 32],
-        }
-    }
-
     pub fn set_seed(&mut self, i_seed: i32) {
         self.m_idum = if i_seed < 0 { i_seed } else { -i_seed };
         self.m_iy = 0;
@@ -220,7 +213,7 @@ impl UniformRandomStream {
 }
 
 fn compute_predicted_spread(seed: i32, spread_factor: f32) -> (f32, f32) {
-    let mut rng = UniformRandomStream::new();
+    let mut rng = UniformRandomStream::default();
     rng.set_seed(seed & 255);
     let x = rng.random_float(-0.5, 0.5) + rng.random_float(-0.5, 0.5);
     let y = rng.random_float(-0.5, 0.5) + rng.random_float(-0.5, 0.5);
@@ -254,23 +247,24 @@ fn resolve_player_sid(player_raw: u32, state: &CheatAnalyserState) -> Option<Ste
         handle_to_entid(player_raw + 1),
     ];
     for ent_id in ent_ids {
-        if let Some(uid) = state.entid_to_userid.get(&ent_id) {
-            if let Some(sid) = state.userid_to_id64.get(uid) {
-                return Some(*sid);
-            }
+        if let Some(uid) = state.entid_to_userid.get(&ent_id)
+            && let Some(sid) = state.userid_to_id64.get(uid)
+        {
+            return Some(*sid);
         }
-        if let Some(player) = state.players.iter().find(|p| p.entity == ent_id) {
-            if let Some(info) = &player.info {
-                if let Ok(sid) = SteamID::from_steam3(&info.steam_id) {
-                    return Some(sid);
-                }
-            }
+        if let Some(player) = state.players.iter().find(|p| p.entity == ent_id)
+            && let Some(info) = &player.info
+            && let Ok(sid) = SteamID::from_steam3(&info.steam_id)
+        {
+            return Some(sid);
         }
     }
     None
 }
 
 pub type Tick = u32;
+
+pub type AngleDelta = (f32, f32);
 
 #[derive(Clone, Debug)]
 struct ReversalEvent {
@@ -282,8 +276,16 @@ struct ReversalEvent {
 struct PlayerTracker {
     last_flag_tick: Tick,
     reversals: Vec<ReversalEvent>,
-    shot_samples: Vec<(Tick, (f32, f32), Option<i32>, Option<f32>)>, // tick, delta, seed, spread
+    shot_samples: Vec<(Tick, AngleDelta, Option<i32>, Option<f32>)>, // tick, delta, seed, spread
     current_weapon: Option<WeaponSpreadInfo>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FireEvent {
+    pub tick: Tick,
+    pub seed: Option<i32>,
+    pub spread: Option<f32>,
+    pub weapon_id: Option<u32>,
 }
 
 #[derive(Default)]
@@ -293,7 +295,7 @@ pub struct NoSpread {
     prev_players: HashMap<SteamID, (ViewAngle, Tick)>,
     player_tick_deltas: HashMap<SteamID, HashMap<Tick, (f32, f32)>>, // sid -> tick -> (dp, dy)
     player_trackers: HashMap<SteamID, PlayerTracker>,
-    fire_events: HashMap<SteamID, Vec<(Tick, Option<i32>, Option<f32>, Option<u32>)>>, // (tick, seed, spread, weapon_id)
+    fire_events: HashMap<SteamID, Vec<FireEvent>>,
     detections: Vec<Detection>,
 }
 
@@ -462,18 +464,23 @@ impl CheatAlgorithm for NoSpread {
                             if let Ok(spread) = f32::try_from(&prop.value) {
                                 spread_opt = Some(spread);
                             }
-                        } else if prop.identifier == BULLETS_WEAPON {
-                            if let Ok(wep) = i64::try_from(&prop.value) {
-                                weapon_opt = Some(wep as u32);
-                            }
+                        } else if prop.identifier == BULLETS_WEAPON
+                            && let Ok(wep) = i64::try_from(&prop.value)
+                        {
+                            weapon_opt = Some(wep as u32);
                         }
                     }
 
-                    if let Some(player_raw) = player_opt {
-                        if let Some(sid) = resolve_player_sid(player_raw, state) {
-                            let current_tick: u32 = tick.into();
-                            self.fire_events.entry(sid).or_default().push((current_tick, seed_opt, spread_opt, weapon_opt));
-                        }
+                    if let Some(player_raw) = player_opt
+                        && let Some(sid) = resolve_player_sid(player_raw, state)
+                    {
+                        let current_tick: u32 = tick.into();
+                        self.fire_events.entry(sid).or_default().push(FireEvent {
+                            tick: current_tick,
+                            seed: seed_opt,
+                            spread: spread_opt,
+                            weapon_id: weapon_opt,
+                        });
                     }
                 }
             }
@@ -483,7 +490,7 @@ impl CheatAlgorithm for NoSpread {
     }
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+        self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
 
         let min_shots_evaluated: i32 = get_parameter_value(&self.params, "min_shots_evaluated").context("\"min_shots_evaluated\" must be a valid value")?;
@@ -531,81 +538,91 @@ impl CheatAlgorithm for NoSpread {
             self.prev_players.insert(steam_id, (player.into(), ticknum));
 
             // Process bullet fire events for this player
-            if let Some(events) = self.fire_events.get(&steam_id) {
-                if let Some(&(f_tick, seed, spread, weapon_id)) = events.last() {
-                    // Check if bullet was fired recently (within last 2 ticks)
-                    if ticknum >= f_tick && ticknum <= f_tick + 2 {
-                        let weapon_name = state.get_player_weapon(player);
-                        let class_name = player.class_name();
-                        let weapon_info = get_weapon_spread_info(weapon_id, &weapon_name, class_name);
+            if let Some(events) = self.fire_events.get(&steam_id)
+                && let Some(&FireEvent {
+                    tick: f_tick,
+                    seed,
+                    spread,
+                    weapon_id,
+                }) = events.last()
+            {
+                // Check if bullet was fired recently (within last 2 ticks)
+                if ticknum >= f_tick && ticknum <= f_tick + 2 {
+                    let weapon_name = state.get_player_weapon(player);
+                    let class_name = player.class_name();
+                    let weapon_info = get_weapon_spread_info(weapon_id, &weapon_name, class_name);
 
-                        let tracker = self.player_trackers.entry(steam_id).or_default();
-                        tracker.current_weapon = weapon_info;
+                    let tracker = self.player_trackers.entry(steam_id).or_default();
+                    tracker.current_weapon = weapon_info;
 
-                        if let Some(deltas) = self.player_tick_deltas.get(&steam_id) {
-                            // Check single-tick flick and return reversal at f_tick or f_tick+1
-                            for t in f_tick..=f_tick + 1 {
-                                if let (Some(&(dp1, dy1)), Some(&(dp2, dy2))) = (deltas.get(&t), deltas.get(&(t + 1))) {
-                                    let mag1 = (dp1 * dp1 + dy1 * dy1).sqrt();
-                                    let mag2 = (dp2 * dp2 + dy2 * dy2).sqrt();
+                    if let Some(deltas) = self.player_tick_deltas.get(&steam_id) {
+                        // Check single-tick flick and return reversal at f_tick or f_tick+1
+                        for t in f_tick..=f_tick + 1 {
+                            let (Some(&(dp1, dy1)), Some(&(dp2, dy2))) = (deltas.get(&t), deltas.get(&(t + 1))) else {
+                                continue;
+                            };
+                            let mag1 = (dp1 * dp1 + dy1 * dy1).sqrt();
+                            let mag2 = (dp2 * dp2 + dy2 * dy2).sqrt();
 
-                                    let dot = dp1 * dp2 + dy1 * dy2;
-                                    let sum_mag = ((dp1 + dp2).powi(2) + (dy1 + dy2).powi(2)).sqrt();
+                            let dot = dp1 * dp2 + dy1 * dy2;
+                            let sum_mag = ((dp1 + dp2).powi(2) + (dy1 + dy2).powi(2)).sqrt();
 
-                                    let max_cone = weapon_info.map_or(2.5, |w| w.max_cone_degrees) + spread_tolerance_margin;
+                            let max_cone = weapon_info.map_or(2.5, |w| w.max_cone_degrees) + spread_tolerance_margin;
 
-                                    if mag1 >= 0.70 && mag2 >= 0.70 && mag1 <= max_cone * 2.0 && dot < 0.0 {
-                                        let cos_angle = dot / (mag1 * mag2);
-                                        let cancel_ratio = sum_mag / mag1.max(mag2);
+                            if !(mag1 >= 0.70 && mag2 >= 0.70 && mag1 <= max_cone * 2.0 && dot < 0.0) {
+                                continue;
+                            }
 
-                                        if cos_angle <= -0.65 && cancel_ratio <= 0.65 {
-                                            // Confirmed micro-reversal
-                                            tracker.reversals.push(ReversalEvent { tick: t, magnitude: mag1 });
+                            let cos_angle = dot / (mag1 * mag2);
+                            let cancel_ratio = sum_mag / mag1.max(mag2);
 
-                                            tracker.shot_samples.push((t, (dy1, dp1), seed, spread));
+                            if !(cos_angle <= -0.65 && cancel_ratio <= 0.65) {
+                                continue;
+                            }
 
-                                            let recent_count = tracker.reversals.iter().filter(|r| ticknum.saturating_sub(r.tick) <= 600).count();
+                            // Confirmed micro-reversal
+                            tracker.reversals.push(ReversalEvent { tick: t, magnitude: mag1 });
 
-                                            let mean_mag: f32 = tracker
-                                                .reversals
-                                                .iter()
-                                                .filter(|r| ticknum.saturating_sub(r.tick) <= 600)
-                                                .map(|r| r.magnitude)
-                                                .sum::<f32>()
-                                                / recent_count.max(1) as f32;
+                            tracker.shot_samples.push((t, (dy1, dp1), seed, spread));
 
-                                            let should_flag = recent_count >= 3 && ticknum >= tracker.last_flag_tick + 60;
-                                            if should_flag {
-                                                tracker.last_flag_tick = ticknum;
-                                                let winfo = weapon_info.unwrap_or(WeaponSpreadInfo {
-                                                    category_id: weapon_id.unwrap_or(0),
-                                                    name: "SpreadWeapon",
-                                                    spread_factor: 0.030,
-                                                    max_cone_degrees: 1.72,
-                                                });
+                            let recent_count = tracker.reversals.iter().filter(|r| ticknum.saturating_sub(r.tick) <= 600).count();
 
-                                                self.detections.push(Detection {
-                                                    tick: ticknum,
-                                                    algorithm: "fidoo/nospread".to_string(),
-                                                    player: steam_id,
-                                                    data: json!({
-                                                        "type": "MicroJitterReversal",
-                                                        "weapon_id": winfo.category_id,
-                                                        "weapon_name": winfo.name,
-                                                        "reversals_count": recent_count,
-                                                        "mean_flick_magnitude": (mean_mag * 100.0).round() / 100.0,
-                                                        "max_allowed_cone": (winfo.max_cone_degrees * 100.0).round() / 100.0,
-                                                    }),
-                                                });
-                                            }
+                            let mean_mag: f32 = tracker
+                                .reversals
+                                .iter()
+                                .filter(|r| ticknum.saturating_sub(r.tick) <= 600)
+                                .map(|r| r.magnitude)
+                                .sum::<f32>()
+                                / recent_count.max(1) as f32;
 
-                                            // Check Method A deterministic seed correlation
-                                            if let Some(det) = tracker.check_seed_correlation(steam_id, ticknum, min_shots, min_seed_correlation) {
-                                                self.detections.push(det);
-                                            }
-                                        }
-                                    }
-                                }
+                            let should_flag = recent_count >= 3 && ticknum >= tracker.last_flag_tick + 60;
+                            if should_flag {
+                                tracker.last_flag_tick = ticknum;
+                                let winfo = weapon_info.unwrap_or(WeaponSpreadInfo {
+                                    category_id: weapon_id.unwrap_or(0),
+                                    name: "SpreadWeapon",
+                                    spread_factor: 0.030,
+                                    max_cone_degrees: 1.72,
+                                });
+
+                                self.detections.push(Detection {
+                                    tick: ticknum,
+                                    algorithm: "fidoo/nospread".to_string(),
+                                    player: steam_id,
+                                    data: json!({
+                                        "type": "MicroJitterReversal",
+                                        "weapon_id": winfo.category_id,
+                                        "weapon_name": winfo.name,
+                                        "reversals_count": recent_count,
+                                        "mean_flick_magnitude": (mean_mag * 100.0).round() / 100.0,
+                                        "max_allowed_cone": (winfo.max_cone_degrees * 100.0).round() / 100.0,
+                                    }),
+                                });
+                            }
+
+                            // Check Method A deterministic seed correlation
+                            if let Some(det) = tracker.check_seed_correlation(steam_id, ticknum, min_shots, min_seed_correlation) {
+                                self.detections.push(det);
                             }
                         }
                     }
@@ -630,7 +647,7 @@ impl CheatAlgorithm for NoSpread {
         let filtered: Vec<Detection> = self
             .detections
             .iter()
-            .filter(|det| counts.get(&det.player).map_or(false, |&c| c >= min_detections as usize))
+            .filter(|det| counts.get(&det.player).is_some_and(|&c| c >= min_detections as usize))
             .cloned()
             .collect();
 
@@ -639,6 +656,7 @@ impl CheatAlgorithm for NoSpread {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use serde_json::json;

@@ -304,19 +304,18 @@ impl CheatAlgorithm for SilentAim {
         self.jg.on_message(message, state, parser_state, tick);
 
         // Record PlayerHurt damage events as confirmed attack hits (for melee and bullets)
-        if let tf_demo_parser::demo::message::Message::GameEvent(event_msg) = message {
-            if let tf_demo_parser::demo::gamevent::GameEvent::PlayerHurt(hurt) = &event_msg.event {
-                if let Some(attacker_id64) = state.get_id64_from_userid(hurt.attacker.into()) {
-                    self.jg.set_last_fire(attacker_id64, u32::from(tick));
-                }
-            }
+        if let tf_demo_parser::demo::message::Message::GameEvent(event_msg) = message
+            && let tf_demo_parser::demo::gamevent::GameEvent::PlayerHurt(hurt) = &event_msg.event
+            && let Some(attacker_id64) = state.get_id64_from_userid(hurt.attacker.into())
+        {
+            self.jg.set_last_fire(attacker_id64, u32::from(tick));
         }
 
         Ok(vec![])
     }
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+        self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
         let algo_name = self.algorithm_name().to_string();
 
@@ -612,6 +611,7 @@ impl CheatAlgorithm for SilentAim {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::base::cheat_analyser_base::Player;
@@ -845,12 +845,12 @@ mod tests {
     #[test]
     fn test_fire_check_requirements() {
         // Hitscan, Melee, and Projectiles must all verify attack/fire events
-        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Melee, true, 100.0, 15.0, 0.0), false);
-        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Hitscan, true, 100.0, 15.0, 0.0), false);
-        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Projectile, true, 100.0, 15.0, 0.0), false);
+        assert!(!SilentAim::should_skip_fire_check(WeaponCategory::Melee, true, 100.0, 15.0, 0.0));
+        assert!(!SilentAim::should_skip_fire_check(WeaponCategory::Hitscan, true, 100.0, 15.0, 0.0));
+        assert!(!SilentAim::should_skip_fire_check(WeaponCategory::Projectile, true, 100.0, 15.0, 0.0));
 
         // Only Sapper with exact angle match and high ratio may skip fire check
-        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Sapper, true, 50.0, 15.0, 0.0), true);
-        assert_eq!(SilentAim::should_skip_fire_check(WeaponCategory::Sapper, false, 50.0, 15.0, 0.0), false);
+        assert!(SilentAim::should_skip_fire_check(WeaponCategory::Sapper, true, 50.0, 15.0, 0.0));
+        assert!(!SilentAim::should_skip_fire_check(WeaponCategory::Sapper, false, 50.0, 15.0, 0.0));
     }
 }

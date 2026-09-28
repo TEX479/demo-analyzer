@@ -90,7 +90,7 @@ impl CheatAlgorithm for BunnyHop {
     }
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+        self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 

@@ -303,10 +303,9 @@ impl CheatAlgorithm for InvalidEquipRegion {
                             && !is_dummy_or_invalid(w.item_def_index)
                             && !is_weapon_wearable(w.item_def_index)
                             && !is_action_item(w.item_def_index)
+                            && let Some(info) = get_cosmetic_info(w.item_def_index)
                         {
-                            if let Some(info) = get_cosmetic_info(w.item_def_index) {
-                                active_cosmetic_map.insert(w.item_def_index, info);
-                            }
+                            active_cosmetic_map.insert(w.item_def_index, info);
                         }
                     }
 
@@ -422,6 +421,7 @@ impl CheatAlgorithm for InvalidEquipRegion {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::base::cheat_analyser_base::Player;
@@ -456,10 +456,12 @@ mod tests {
 
         let player_ent = EntityId::from(10u32);
         let mut state = CheatAnalyserState::default();
-        let mut p = Player::default();
-        p.entity = player_ent;
-        p.state = PlayerState::Alive;
-        p.class = Class::Heavy;
+        let mut p = Player {
+            entity: player_ent,
+            state: PlayerState::Alive,
+            class: Class::Heavy,
+            ..Default::default()
+        };
         let mut uinfo = tf_demo_parser::demo::data::UserInfo::default();
         uinfo.player_info.steam_id = "[U:1:1]".to_string();
         p.info = Some(uinfo.into());
@@ -513,10 +515,12 @@ mod tests {
 
         let player_ent = EntityId::from(10u32);
         let mut state = CheatAnalyserState::default();
-        let mut p = Player::default();
-        p.entity = player_ent;
-        p.state = PlayerState::Alive;
-        p.class = Class::Heavy;
+        let mut p = Player {
+            entity: player_ent,
+            state: PlayerState::Alive,
+            class: Class::Heavy,
+            ..Default::default()
+        };
         let mut uinfo = tf_demo_parser::demo::data::UserInfo::default();
         uinfo.player_info.steam_id = "[U:1:1]".to_string();
         p.info = Some(uinfo.into());
@@ -571,10 +575,12 @@ mod tests {
         let player_account_id = (steam_id64 & 0xFFFFFFFF) as u32;
 
         let mut state = CheatAnalyserState::default();
-        let mut p = Player::default();
-        p.entity = player_ent;
-        p.state = PlayerState::Alive;
-        p.class = Class::Pyro;
+        let mut p = Player {
+            entity: player_ent,
+            state: PlayerState::Alive,
+            class: Class::Pyro,
+            ..Default::default()
+        };
         let mut uinfo = tf_demo_parser::demo::data::UserInfo::default();
         uinfo.player_info.steam_id = "[U:1:1271906326]".to_string();
         p.info = Some(uinfo.into());

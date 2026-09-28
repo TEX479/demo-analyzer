@@ -651,17 +651,17 @@ impl CheatAlgorithm for AutoBackstab {
 
                         self.backstab_records.entry(attacker_sid).or_default().push(record);
 
-                        if is_instant_trigger || is_fleeting_exploit || is_snap_backstab || is_impossible_angle || is_teleport_distance || is_blind_triggerbot {
-                            if self.logged_detections.insert((attacker_sid, t_attack)) {
-                                let detection = Detection {
-                                    tick: t_attack,
-                                    algorithm: self.algorithm_name().to_string(),
-                                    player: attacker_sid,
-                                    data: data_json,
-                                };
-                                self.detections.push(detection.clone());
-                                new_detections.push(detection);
-                            }
+                        if (is_instant_trigger || is_fleeting_exploit || is_snap_backstab || is_impossible_angle || is_teleport_distance || is_blind_triggerbot)
+                            && self.logged_detections.insert((attacker_sid, t_attack))
+                        {
+                            let detection = Detection {
+                                tick: t_attack,
+                                algorithm: self.algorithm_name().to_string(),
+                                player: attacker_sid,
+                                data: data_json,
+                            };
+                            self.detections.push(detection.clone());
+                            new_detections.push(detection);
                         }
                     }
                 }
@@ -674,7 +674,7 @@ impl CheatAlgorithm for AutoBackstab {
     }
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+        self.jg.on_tick(state)?;
         self.record_player_snapshots(state);
         let ticknum = u32::from(state.tick);
 
@@ -724,14 +724,14 @@ impl CheatAlgorithm for AutoBackstab {
             let k = suspicious_records.len();
 
             if k >= min_stabs_aggregate {
-                let sum_reaction: f32 = suspicious_records.iter().map(|r| r.reaction_ticks.unwrap() as f32).sum();
+                let sum_reaction: f32 = suspicious_records.iter().map(|r| r.reaction_ticks.unwrap_or_default() as f32).sum();
                 let mean_reaction = sum_reaction / k as f32;
 
                 let variance: f32 = if k > 1 {
                     suspicious_records
                         .iter()
                         .map(|r| {
-                            let diff = r.reaction_ticks.unwrap() as f32 - mean_reaction;
+                            let diff = r.reaction_ticks.unwrap_or_default() as f32 - mean_reaction;
                             diff * diff
                         })
                         .sum::<f32>()
@@ -784,6 +784,7 @@ fn format_class_name(class: Class) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tf_demo_parser::demo::gameevent_gen::PlayerHurtEvent;

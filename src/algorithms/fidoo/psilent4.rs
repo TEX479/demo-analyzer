@@ -129,15 +129,14 @@ impl Psilent4 {
 
     fn record_snapshot(&mut self, steam_id: SteamID, snapshot: PlayerSnapshot) {
         let history = self.histories.entry(steam_id).or_default();
-        if let Some(previous) = history.back() {
-            if previous.tick == snapshot.tick
-                && previous.simtime == snapshot.simtime
-                && (previous.yaw - snapshot.yaw).abs() < 0.001
-                && (previous.pitch - snapshot.pitch).abs() < 0.001
-                && vector_length(previous.position - snapshot.position) < 0.01
-            {
-                return;
-            }
+        if let Some(previous) = history.back()
+            && previous.tick == snapshot.tick
+            && previous.simtime == snapshot.simtime
+            && (previous.yaw - snapshot.yaw).abs() < 0.001
+            && (previous.pitch - snapshot.pitch).abs() < 0.001
+            && vector_length(previous.position - snapshot.position) < 0.01
+        {
+            return;
         }
         history.push_back(snapshot);
     }
@@ -159,7 +158,7 @@ impl Psilent4 {
 
             // Support players with 150-200ms latency (up to 20 ticks)
             let ping_ticks = ((candidate.player_ping as f32 / 15.0).round() as u32).min(20);
-            let effective_lookaround = (lookaround_ticks + ping_ticks).max(16).min(32);
+            let effective_lookaround = (lookaround_ticks + ping_ticks).clamp(16, 32);
 
             if !flush && current_tick < candidate.tick.saturating_add(effective_lookaround) {
                 waiting.push(candidate);
@@ -405,7 +404,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         .max(1) as usize;
     let history = histories.get(&candidate.player)?;
     let ping_ticks = ((candidate.player_ping as f32 / 15.0).round() as u32).min(20);
-    let effective_lookaround = (lookaround_ticks + ping_ticks).max(16).min(32);
+    let effective_lookaround = (lookaround_ticks + ping_ticks).clamp(16, 32);
     let start_tick = candidate.tick.saturating_sub(effective_lookaround);
     let end_tick = candidate.tick.saturating_add(effective_lookaround);
     let samples: Vec<_> = history
@@ -509,15 +508,15 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                                 z: ground_z,
                             };
                             let diff = impact - eye_impact;
-                            if diff.x * diff.x + diff.y * diff.y <= 2500.0 {
-                                if let Some(ground_dir) = normalized(impact - eye) {
-                                    let ground_angles = vector_angles(ground_dir);
-                                    let delta = view.delta(ground_angles);
-                                    if delta < compensated_delta {
-                                        compensated_delta = delta;
-                                        best_view = view;
-                                        best_tick = tick;
-                                    }
+                            if diff.x * diff.x + diff.y * diff.y <= 2500.0
+                                && let Some(ground_dir) = normalized(impact - eye)
+                            {
+                                let ground_angles = vector_angles(ground_dir);
+                                let delta = view.delta(ground_angles);
+                                if delta < compensated_delta {
+                                    compensated_delta = delta;
+                                    best_view = view;
+                                    best_tick = tick;
                                 }
                             }
                         }

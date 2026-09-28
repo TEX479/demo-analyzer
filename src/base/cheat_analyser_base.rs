@@ -397,22 +397,21 @@ impl CheatAnalyserState {
             return Some(name.as_str());
         }
         for player in &self.players {
-            if let Some(info) = &player.info {
-                if let Ok(steam_id) = SteamID::from_steam3(&info.steam_id) {
-                    if u64::from(steam_id) == sid {
-                        return Some(info.name.as_str());
-                    }
-                }
+            if let Some(info) = &player.info
+                && let Ok(steam_id) = SteamID::from_steam3(&info.steam_id)
+                && u64::from(steam_id) == sid
+            {
+                return Some(info.name.as_str());
             }
         }
         None
     }
 
     pub fn get_player_weapon(&self, player: &Player) -> String {
-        if let Some(weapon_ent) = player.active_weapon {
-            if let Some(weapon) = self.weapons.get(&weapon_ent) {
-                return weapon.name(player.class);
-            }
+        if let Some(weapon_ent) = player.active_weapon
+            && let Some(weapon) = self.weapons.get(&weapon_ent)
+        {
+            return weapon.name(player.class);
         }
         "unknown".to_string()
     }
@@ -883,12 +882,11 @@ impl CheatAnalyser {
         } else {
             let mut item_def = None;
             for prop in entity.props(parser_state) {
-                if let Some((_, prop_name)) = prop.identifier.names() {
-                    if prop_name == "m_iItemDefinitionIndex" {
-                        if let Ok(val) = i64::try_from(&prop.value) {
-                            item_def = Some(val as u16);
-                        }
-                    }
+                if let Some((_, prop_name)) = prop.identifier.names()
+                    && prop_name == "m_iItemDefinitionIndex"
+                    && let Ok(val) = i64::try_from(&prop.value)
+                {
+                    item_def = Some(val as u16);
                 }
             }
             if item_def.is_some()
@@ -1236,7 +1234,7 @@ impl CheatAnalyser {
             self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id);
             self.state.friends_ids.insert(ent_id, user_info.player_info.friends_id);
             self.state.custom_files.insert(ent_id, user_info.player_info.custom_file);
-            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id.clone());
+            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id);
             if let Ok(steam_id) = SteamID::from_steam3(&user_info.player_info.steam_id) {
                 self.state.set_userid_to_id64(user_info.player_info.user_id, steam_id);
 
