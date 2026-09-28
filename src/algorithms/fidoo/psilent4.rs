@@ -237,7 +237,7 @@ impl CheatAlgorithm for Psilent4 {
             let Some(user_id) = state.get_userid_from_entid(owner_entity) else {
                 continue;
             };
-            let Some(steam_id) = state.get_id64_from_userid(user_id) else {
+            let Some(steam_id) = state.get_steamid_from_userid(user_id) else {
                 continue;
             };
             let Some(player) = state.players.iter().find(|player| player_id(player) == Some(steam_id)) else {

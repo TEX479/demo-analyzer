@@ -454,7 +454,7 @@ impl CheatAnalyserState {
         self.entid_to_userid.get(&entid).copied()
     }
 
-    pub fn get_id64_from_userid(&self, userid: UserId) -> Option<SteamID> {
+    pub fn get_steamid_from_userid(&self, userid: UserId) -> Option<SteamID> {
         self.userid_to_id64.get(&userid).copied()
     }
 

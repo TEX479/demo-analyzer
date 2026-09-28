@@ -78,10 +78,10 @@ impl CheatAlgorithm for BackTrack {
             let max_angle_diff: f32 = get_parameter_value(&self.params, "max_angle_diff")?;
 
             // get steam id64 from uids
-            let Some(attacker_sid) = state.get_id64_from_userid(attacker_uid) else {
+            let Some(attacker_sid) = state.get_steamid_from_userid(attacker_uid) else {
                 return Ok(Vec::new());
             };
-            let Some(victim_sid) = state.get_id64_from_userid(victim_uid) else {
+            let Some(victim_sid) = state.get_steamid_from_userid(victim_uid) else {
                 return Ok(Vec::new());
             };
 

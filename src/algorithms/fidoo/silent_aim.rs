@@ -6,16 +6,16 @@ use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 use tf_demo_parser::demo::vector::Vector;
 
-use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
+use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-use crate::util::helpers::ViewAngle;
 use crate::util::helpers::player_finders::valid_players;
+use crate::util::helpers::{KeyValueVec, ViewAngle};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const TELEPORT_DIST_SQ: f32 = 256.0 * 256.0;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct PlayerSnapshot {
     tick: u32,
     simtime: u16,
@@ -23,7 +23,7 @@ struct PlayerSnapshot {
     angle: ViewAngle,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 struct PlayerHistoryState {
     pvs_ticks: u32,
     history: VecDeque<PlayerSnapshot>,
@@ -41,12 +41,11 @@ enum WeaponCategory {
     Excluded,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SilentAim {
-    player_states: HashMap<SteamID, PlayerHistoryState>,
+    player_states: KeyValueVec<SteamID, PlayerHistoryState>,
     jg: JankGuard,
     params: Parameters,
-    detections: Vec<Detection>,
 }
 
 impl SilentAim {
@@ -306,7 +305,7 @@ impl CheatAlgorithm for SilentAim {
         // Record PlayerHurt damage events as confirmed attack hits (for melee and bullets)
         if let tf_demo_parser::demo::message::Message::GameEvent(event_msg) = message
             && let tf_demo_parser::demo::gamevent::GameEvent::PlayerHurt(hurt) = &event_msg.event
-            && let Some(attacker_id64) = state.get_id64_from_userid(hurt.attacker.into())
+            && let Some(attacker_id64) = state.get_steamid_from_userid(hurt.attacker.into())
         {
             self.jg.set_last_fire(attacker_id64, u32::from(tick));
         }
@@ -317,6 +316,7 @@ impl CheatAlgorithm for SilentAim {
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
+        println!("processing tick {}", ticknum);
         let algo_name = self.algorithm_name().to_string();
 
         let tick_window = get_parameter_value::<i32>(&self.params, "tick_window")
@@ -345,17 +345,15 @@ impl CheatAlgorithm for SilentAim {
         let mut current_active_sids: Vec<SteamID> = Vec::new();
         let mut tick_detections = Vec::new();
 
-        for (player, _info, steam_id) in valid_players(state.players.iter()) {
-            current_active_sids.push(steam_id);
-            let pstate = self.player_states.entry(steam_id).or_default();
+        let mut players_processed = Vec::with_capacity(self.player_states.len());
 
-            // TODO: make it so players not in pvs or not alive still get reset
-            // PVS and Life state validation: player must be alive and in PVS
-            if !player.in_pvs || player.state != PlayerState::Alive {
-                pstate.pvs_ticks = 0;
-                pstate.history.clear();
-                continue;
-            }
+        for (player, _info, steam_id) in valid_players(state.players.iter()) {
+            println!("iterating over {} ({:?})", steam_id.steam3(), player);
+            current_active_sids.push(steam_id);
+            let pstate = self.player_states.get_mut_or_insert_default(steam_id);
+            println!("pstate: {:?}", pstate);
+
+            players_processed.push(steam_id);
 
             // Check network continuity: reset if a large packet drop occurs (> 16 ticks / 250ms)
             if pstate.last_update_tick > 0 && ticknum.saturating_sub(pstate.last_update_tick) > 16 {
@@ -370,9 +368,6 @@ impl CheatAlgorithm for SilentAim {
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
-                if ticks_since_event == 0 {
-                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
-                }
                 pstate.history.clear();
                 continue;
             }
@@ -421,12 +416,11 @@ impl CheatAlgorithm for SilentAim {
 
             // Search for an anchor snapshot in history [2..=max_lookback]
             let max_lookback = tick_window.min(history_len - 1);
-            let mut detected = false;
             let mut flagged = false;
             let mut consumed_tick: Option<u32> = None;
 
-            for i in 2..=max_lookback {
-                let anchor_snap = &pstate.history[i];
+            println!("entering lookback_loop");
+            'lookback_loop: for (lookback_index, anchor_snap) in pstate.history.iter().enumerate().skip(2).take(max_lookback.saturating_sub(2)) {
                 let anchor_angle = anchor_snap.angle;
 
                 // Verify the total window duration is within silent aimbot flick time (<= 8 ticks)
@@ -435,15 +429,13 @@ impl CheatAlgorithm for SilentAim {
                 }
 
                 // Verify packet and spatial continuity across each adjacent frame in window
-                let mut contiguous = true;
-                for step in 0..i {
+                for step in 0..lookback_index {
                     let s_newer = &pstate.history[step];
                     let s_older = &pstate.history[step + 1];
 
                     // Packet continuity: max 2 ticks gap between consecutive snapshots
                     if s_newer.tick.saturating_sub(s_older.tick) > 2 {
-                        contiguous = false;
-                        break;
+                        continue 'lookback_loop;
                     }
 
                     // Spatial continuity: no teleportation between frames
@@ -451,13 +443,8 @@ impl CheatAlgorithm for SilentAim {
                     let dy = s_newer.position.y - s_older.position.y;
                     let dz = s_newer.position.z - s_older.position.z;
                     if (dx * dx + dy * dy + dz * dz) > TELEPORT_DIST_SQ {
-                        contiguous = false;
-                        break;
+                        continue 'lookback_loop;
                     }
-                }
-
-                if !contiguous {
-                    continue;
                 }
 
                 // Exclude quantized pitch baseline glitches
@@ -486,23 +473,24 @@ impl CheatAlgorithm for SilentAim {
                     continue;
                 }
 
+                println!("doing spike-check");
                 // Intermediate spike check: at least one tick strictly between 0 and i must have spiked
-                for m in 1..i {
-                    let mid_snap = &pstate.history[m];
-                    let mid_angle = mid_snap.angle;
-
+                for (middle_index, mid_snap) in pstate
+                    .history
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .take(lookback_index - 1)
                     // Skip quantized pitch glitch on intermediate snapshot
-                    if Self::is_quantized_pitch_glitch(mid_snap.angle.pitch) {
-                        continue;
-                    }
-
+                    .filter(|(_, mid_snap)| !Self::is_quantized_pitch_glitch(mid_snap.angle.pitch))
                     // Skip extreme engine pitch clamp or console command pitch flips (+lookup; +lookdown)
-                    if Self::is_extreme_pitch_clamp(mid_snap.angle.pitch)
-                        || Self::is_pitch_command_flip(curr_snap.angle.pitch, mid_snap.angle.pitch)
-                        || Self::is_pitch_command_flip(anchor_snap.angle.pitch, mid_snap.angle.pitch)
-                    {
-                        continue;
-                    }
+                    .filter(|(_, mid_snap)| {
+                        Self::is_extreme_pitch_clamp(mid_snap.angle.pitch)
+                            || Self::is_pitch_command_flip(curr_snap.angle.pitch, mid_snap.angle.pitch)
+                            || Self::is_pitch_command_flip(anchor_snap.angle.pitch, mid_snap.angle.pitch)
+                    })
+                {
+                    let mid_angle = mid_snap.angle;
 
                     let mid_delta_curr = current_angle.delta(mid_angle);
                     let mid_delta_anchor = anchor_angle.delta(mid_angle);
@@ -513,7 +501,7 @@ impl CheatAlgorithm for SilentAim {
                     }
 
                     // Ratio check: excursion must be significantly larger than baseline drift
-                    let ratio = if delta_0_i > 0.0001 { peak_delta / delta_0_i } else { peak_delta / 0.0001 };
+                    let ratio = peak_delta / delta_0_i.max(0.0001);
 
                     let effective_min_ratio = match weapon_category {
                         WeaponCategory::Projectile => min_ratio.max(12.0),
@@ -563,30 +551,23 @@ impl CheatAlgorithm for SilentAim {
                                 "delta_1_3": delta_0_i,
                                 "delta_2_3": peak_delta,
                                 "ratio": ratio,
-                                "match_index": i,
-                                "middle_index": m,
+                                "match_index": lookback_index,
+                                "middle_index": middle_index,
                                 "pvs_ticks": pstate.pvs_ticks,
                                 "is_exact_match": is_exact,
                                 "suspicion_count": current_suspicion,
                             }),
                         };
 
-                        tick_detections.push(detection.clone());
-                        self.detections.push(detection);
+                        tick_detections.push(detection);
 
                         flagged = true;
-                        detected = true;
-                        break;
+                        break 'lookback_loop;
                     } else {
                         // Suspicious drift recorded; consume through curr_snap to prevent double-counting this spike
                         consumed_tick = Some(curr_snap.tick);
-                        detected = true;
-                        break;
+                        break 'lookback_loop;
                     }
-                }
-
-                if detected {
-                    break;
                 }
             }
 
@@ -599,6 +580,14 @@ impl CheatAlgorithm for SilentAim {
                 pstate.history.retain(|s| s.tick >= consumed);
             }
         }
+
+        self.player_states
+            .iter_mut()
+            .filter(|(sid, _player_history_state)| !players_processed.contains(*sid))
+            .for_each(|(_sid, player_history_state)| {
+                player_history_state.history.clear();
+                player_history_state.pvs_ticks = 0;
+            });
 
         // Clean up disconnected players
         self.player_states.retain(|sid, _| current_active_sids.contains(sid));
@@ -615,7 +604,7 @@ impl CheatAlgorithm for SilentAim {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::base::cheat_analyser_base::Player;
+    use crate::base::cheat_analyser_base::{Player, PlayerState};
     use tf_demo_parser::demo::message::packetentities::EntityId;
     use tf_demo_parser::demo::parser::analyser::{Class, Team, UserId, UserInfo};
 
@@ -655,6 +644,7 @@ mod tests {
         }
     }
 
+    // FIX:
     #[test]
     fn test_exact_match_instant_flag() {
         let mut algo = SilentAim::new();
@@ -691,6 +681,7 @@ mod tests {
         assert_eq!(detections[0].data["is_exact_match"], true);
     }
 
+    // FIX:
     #[test]
     fn test_drift_requires_suspicion_threshold() {
         let mut algo = SilentAim::new();
@@ -743,6 +734,7 @@ mod tests {
         assert_eq!(det2[0].data["suspicion_count"], 2);
     }
 
+    // FIX:
     #[test]
     fn test_high_pitch_scout_aim_not_filtered() {
         let mut algo = SilentAim::new();

@@ -93,7 +93,7 @@ impl CheatAlgorithm for DoubleTap {
             let Some((attacker, _attacker_info, attacker_sid)) = player_with_uid(players.iter(), attacker_uid) else {
                 return Ok(Vec::new());
             };
-            let Some(victim_sid) = state.get_id64_from_userid(victim_uid) else {
+            let Some(victim_sid) = state.get_steamid_from_userid(victim_uid) else {
                 return Ok(Vec::new());
             };
 

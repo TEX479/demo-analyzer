@@ -426,7 +426,7 @@ impl CheatAlgorithm for AutoBackstab {
 
                             if let Some(owner_entity_id) = owner_ent
                                 && let Some(uid) = state.get_userid_from_entid(owner_entity_id)
-                                && let Some(sid) = state.get_id64_from_userid(uid)
+                                && let Some(sid) = state.get_steamid_from_userid(uid)
                             {
                                 self.update_spy_ready_state(sid, ready, ticknum);
                             }
@@ -457,12 +457,12 @@ impl CheatAlgorithm for AutoBackstab {
             }
             Message::GameEvent(event_msg) => match &event_msg.event {
                 GameEvent::PlayerSpawn(spawn) => {
-                    if let Some(sid) = state.get_id64_from_userid(spawn.user_id.into()) {
+                    if let Some(sid) = state.get_steamid_from_userid(spawn.user_id.into()) {
                         self.reset_spy_state(sid);
                     }
                 }
                 GameEvent::PostInventoryApplication(app) => {
-                    if let Some(sid) = state.get_id64_from_userid(app.user_id.into()) {
+                    if let Some(sid) = state.get_steamid_from_userid(app.user_id.into()) {
                         self.reset_spy_state(sid);
                     }
                 }

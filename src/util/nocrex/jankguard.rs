@@ -55,17 +55,17 @@ impl JankGuard {
         match message {
             tf_demo_parser::demo::message::Message::GameEvent(tf_demo_parser::demo::message::GameEventMessage { event, .. }) => match event {
                 tf_demo_parser::demo::gamevent::GameEvent::PlayerSpawn(spawn) => {
-                    if let Some(id) = state.get_id64_from_userid(spawn.user_id.into()) {
+                    if let Some(id) = state.get_steamid_from_userid(spawn.user_id.into()) {
                         self.player_data.entry(id).or_default().last_spawn = tick.into();
                     }
                 }
                 tf_demo_parser::demo::gamevent::GameEvent::PostInventoryApplication(app) => {
-                    if let Some(id) = state.get_id64_from_userid(app.user_id.into()) {
+                    if let Some(id) = state.get_steamid_from_userid(app.user_id.into()) {
                         self.player_data.entry(id).or_default().last_spawn = tick.into();
                     }
                 }
                 tf_demo_parser::demo::gamevent::GameEvent::PlayerTeleported(tele) => {
-                    if let Some(id) = state.get_id64_from_userid(tele.user_id.into()) {
+                    if let Some(id) = state.get_steamid_from_userid(tele.user_id.into()) {
                         self.player_data.entry(id).or_default().last_teleport = tick.into();
                     }
                 }
