@@ -1,7 +1,7 @@
 use analysis_template::{
     PRINT_VOTES, SILENT, dev_print,
     lib::{
-        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, CheatAlgorithm, DoubleTap, OOBPitch, ViewAngles180Degrees},
+        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, SilentAim, ViewAngles180Degrees},
         parameters::Parameters,
     },
     live_analyzer::live_analysis,
@@ -75,6 +75,7 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
+        Box::new(SilentAim::new()),
         // Box::new(AngleAccelerationAnalyzer::default()),
     ];
     config_algorithms_desired(&mut algos);

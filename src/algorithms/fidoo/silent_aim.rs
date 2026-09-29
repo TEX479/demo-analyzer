@@ -436,7 +436,9 @@ impl CheatAlgorithm for SilentAim {
                 }
 
                 // Verify packet and spatial continuity across each adjacent frame in window
-                let is_uncontinuous = pstate
+                // TODO: maybe set `consumed_tick` so the incontinuous history gets cleared
+                // and the fresh one is allowed to influence detections earlier
+                let is_incontinuous = pstate
                     .history
                     .iter()
                     .zip(pstate.history.iter().skip(1))
@@ -448,7 +450,7 @@ impl CheatAlgorithm for SilentAim {
                         let spatial_incontinuity = (s_newer.position - s_older.position).length_square() > TELEPORT_DIST_SQ;
                         tick_incontinuity || spatial_incontinuity
                     });
-                if is_uncontinuous {
+                if is_incontinuous {
                     break 'lookback_loop;
                 }
 
@@ -478,13 +480,12 @@ impl CheatAlgorithm for SilentAim {
                 }
 
                 // Intermediate spike check: at least one tick strictly between 0 and i must have spiked
-                // TODO: check why we have the inner loop / why check increasingly larger windows
                 for (middle_index, mid_snap) in pstate
                     .history
                     .iter()
                     .enumerate()
                     .skip(1)
-                    .take(lookback_index - 1)
+                    .take(lookback_index - 2)
                     // Skip quantized pitch glitch on intermediate snapshot
                     .filter(|(_, mid_snap)| !Self::is_quantized_pitch_glitch(mid_snap.angle.pitch))
                     // Skip extreme engine pitch clamp or console command pitch flips (+lookup; +lookdown)
