@@ -9,7 +9,7 @@ use tf_demo_parser::demo::vector::Vector;
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-use crate::util::helpers::player_finders::valid_players;
+use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::nocrex::jankguard::JankGuard;
 
 #[derive(Default, Clone)]
@@ -102,7 +102,7 @@ impl CheatAlgorithm for BunnyHop {
         let mut tick_detections = Vec::new();
         let algo_name = self.algorithm_name().to_string();
 
-        for (player, _info, steam_id) in valid_players(players.iter()) {
+        for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             // Ignore detections within 60 ticks of spawn or teleport

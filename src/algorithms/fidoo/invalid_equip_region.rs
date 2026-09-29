@@ -11,7 +11,7 @@ use tf_demo_parser::{MessageType, ParserState};
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
-use crate::util::helpers::player_finders::valid_players;
+use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::schema_equip_regions::{CosmeticInfo, check_cosmetic_conflict, get_cosmetic_info, is_action_item, is_dummy_or_invalid, is_weapon_wearable};
 
 #[derive(Debug, Clone)]
@@ -276,7 +276,7 @@ impl CheatAlgorithm for InvalidEquipRegion {
 
                 let mut detections = Vec::new();
 
-                for (player, _, steam_id64) in valid_players(state.players.iter()) {
+                for (player, _, steam_id64) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
                     let p_state = self.players.entry(player.entity).or_default();
 
                     // If player changed class, advance generation to invalidate previous class wearables

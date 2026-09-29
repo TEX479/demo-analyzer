@@ -6,7 +6,7 @@ use crate::{
         algorithm::{CheatAlgorithm, Detection},
         parameters::{Parameter, Parameters, get_parameter_value},
     },
-    util::helpers::player_finders::valid_players,
+    util::helpers::player_finders::{players_alive_and_in_pvs, valid_players},
 };
 use anyhow::Error;
 use serde_json::json;
@@ -79,7 +79,7 @@ impl CheatAlgorithm for OOBPitch {
 
             let is_valve_server = self.server_name.starts_with("Valve Matchmaking Server");
 
-            for (player, _info, steam_id) in valid_players(state.players.iter()) {
+            for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
                 if !(min_pitch..=max_pitch).contains(&player.pitch_angle) {
                     detections.push(steam_id);
                     if !self.last_detections.contains(&steam_id) {

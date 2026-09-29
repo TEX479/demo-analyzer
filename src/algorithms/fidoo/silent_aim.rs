@@ -1,3 +1,9 @@
+/*
+I'd like to thank the creator of this file.
+The fact that you added unit tests for your algorithm is huge.
+I found a bug in my own "cleaner" code because of that. Thank you very much.
+Because of the tests I also went ahead and added a bunch more just in case.
+*/
 use std::collections::{HashMap, VecDeque};
 
 use anyhow::{Context, Error};
@@ -5,7 +11,7 @@ use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
-use crate::base::cheat_analyser_base::CheatAnalyserState;
+use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 use crate::util::helpers::player_finders::valid_players;
@@ -318,7 +324,6 @@ impl CheatAlgorithm for SilentAim {
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
-        println!("processing tick {}", ticknum);
         let algo_name = self.algorithm_name().to_string();
 
         let tick_window = get_parameter_value::<i32>(&self.params, "tick_window")
@@ -344,18 +349,21 @@ impl CheatAlgorithm for SilentAim {
             .context("\"clean_ticks_to_reset\" has to be a valid value")?
             .max(1) as u32;
 
-        let mut current_active_sids: Vec<SteamID> = Vec::new();
         let mut tick_detections = Vec::new();
-
-        let mut players_processed = Vec::with_capacity(self.player_states.len());
+        let mut players_to_remove = self.player_states.keys().to_vec();
 
         for (player, _info, steam_id) in valid_players(state.players.iter()) {
-            println!("iterating over {} ({:?})", steam_id.steam3(), player);
-            current_active_sids.push(steam_id);
-            let pstate = self.player_states.get_mut_or_insert_default(steam_id);
-            println!("pstate: {:?}", pstate);
+            if let Some(i) = players_to_remove.iter().enumerate().find(|(_, sid)| **sid == steam_id).map(|(i, _)| i) {
+                players_to_remove.swap_remove(i);
+            }
 
-            players_processed.push(steam_id);
+            let pstate = self.player_states.get_mut_or_insert_default(steam_id);
+
+            if !matches!(player.state, PlayerState::Alive) || !player.in_pvs {
+                pstate.history.clear();
+                pstate.pvs_ticks = 0;
+                continue;
+            }
 
             // Check network continuity: reset if a large packet drop occurs (> 16 ticks / 250ms)
             if pstate.last_update_tick > 0 && ticknum.saturating_sub(pstate.last_update_tick) > 16 {
@@ -385,14 +393,14 @@ impl CheatAlgorithm for SilentAim {
                 continue;
             }
 
-            let snapshot = PlayerSnapshot {
+            let curr_snap = PlayerSnapshot {
                 tick: ticknum,
                 simtime: player.simtime,
                 position: player.position.into(),
                 angle: player.into(),
             };
 
-            pstate.history.push_front(snapshot);
+            pstate.history.push_front(curr_snap);
             while pstate.history.len() > tick_window + 2 {
                 pstate.history.pop_back();
             }
@@ -402,7 +410,6 @@ impl CheatAlgorithm for SilentAim {
                 continue;
             }
 
-            let curr_snap = &pstate.history[0];
             let current_angle = curr_snap.angle;
 
             // Classify weapon
@@ -417,12 +424,10 @@ impl CheatAlgorithm for SilentAim {
             let class_name = player.class_name();
 
             // Search for an anchor snapshot in history [2..=max_lookback]
-            let max_lookback = tick_window.min(history_len - 1);
             let mut flagged = false;
             let mut consumed_tick: Option<u32> = None;
 
-            println!("entering lookback_loop");
-            'lookback_loop: for (lookback_index, anchor_snap) in pstate.history.iter().enumerate().skip(2).take(max_lookback.saturating_sub(2)) {
+            'lookback_loop: for (lookback_index, anchor_snap) in pstate.history.iter().enumerate().skip(2) {
                 let anchor_angle = anchor_snap.angle;
 
                 // Verify the total window duration is within silent aimbot flick time (<= 8 ticks)
@@ -438,13 +443,13 @@ impl CheatAlgorithm for SilentAim {
                     .take(lookback_index)
                     .any(|(s_older, s_newer)| {
                         // Packet continuity: max 2 ticks gap between consecutive snapshots
-                        let tick_uncontinuity = s_newer.tick.saturating_sub(s_older.tick) > 2;
+                        let tick_incontinuity = s_newer.tick.saturating_sub(s_older.tick) > 2;
                         // Spatial continuity: no teleportation between frames
-                        let spatial_uncontinuity = (s_newer.position - s_older.position).length_square() > TELEPORT_DIST_SQ;
-                        tick_uncontinuity || spatial_uncontinuity
+                        let spatial_incontinuity = (s_newer.position - s_older.position).length_square() > TELEPORT_DIST_SQ;
+                        tick_incontinuity || spatial_incontinuity
                     });
                 if is_uncontinuous {
-                    continue;
+                    break 'lookback_loop;
                 }
 
                 // Exclude quantized pitch baseline glitches
@@ -472,7 +477,6 @@ impl CheatAlgorithm for SilentAim {
                     continue;
                 }
 
-                println!("doing spike-check");
                 // Intermediate spike check: at least one tick strictly between 0 and i must have spiked
                 // TODO: check why we have the inner loop / why check increasingly larger windows
                 for (middle_index, mid_snap) in pstate
@@ -485,9 +489,9 @@ impl CheatAlgorithm for SilentAim {
                     .filter(|(_, mid_snap)| !Self::is_quantized_pitch_glitch(mid_snap.angle.pitch))
                     // Skip extreme engine pitch clamp or console command pitch flips (+lookup; +lookdown)
                     .filter(|(_, mid_snap)| {
-                        Self::is_extreme_pitch_clamp(mid_snap.angle.pitch)
+                        !(Self::is_extreme_pitch_clamp(mid_snap.angle.pitch)
                             || Self::is_pitch_command_flip(curr_snap.angle.pitch, mid_snap.angle.pitch)
-                            || Self::is_pitch_command_flip(anchor_snap.angle.pitch, mid_snap.angle.pitch)
+                            || Self::is_pitch_command_flip(anchor_snap.angle.pitch, mid_snap.angle.pitch))
                     })
                 {
                     let mid_angle = mid_snap.angle;
@@ -527,15 +531,10 @@ impl CheatAlgorithm for SilentAim {
                     // Dual-mode flagging system:
                     // If exact match (1st and 3rd ticks are identical): bypass suspicion threshold and flag immediately!
                     // If minor drift: increment suspicion count and only flag when suspicion_threshold is met.
-                    let current_suspicion = if is_exact {
-                        suspicion_threshold
-                    } else {
-                        pstate.suspicion_count += 1;
-                        pstate.last_suspicious_tick = ticknum;
-                        pstate.suspicion_count
-                    };
+                    pstate.suspicion_count += 1;
+                    pstate.last_suspicious_tick = ticknum;
 
-                    if current_suspicion >= suspicion_threshold {
+                    if is_exact || pstate.suspicion_count >= suspicion_threshold {
                         let detection = Detection {
                             tick: ticknum,
                             algorithm: algo_name.clone(),
@@ -555,19 +554,18 @@ impl CheatAlgorithm for SilentAim {
                                 "middle_index": middle_index,
                                 "pvs_ticks": pstate.pvs_ticks,
                                 "is_exact_match": is_exact,
-                                "suspicion_count": current_suspicion,
+                                "suspicion_count": pstate.suspicion_count,
                             }),
                         };
 
                         tick_detections.push(detection);
 
                         flagged = true;
-                        break 'lookback_loop;
                     } else {
                         // Suspicious drift recorded; consume through curr_snap to prevent double-counting this spike
                         consumed_tick = Some(curr_snap.tick);
-                        break 'lookback_loop;
                     }
+                    break 'lookback_loop;
                 }
             }
 
@@ -581,18 +579,8 @@ impl CheatAlgorithm for SilentAim {
             }
         }
 
-        // maybe TODO: replace `players_processed` with `current_active_sids`
-        self.player_states
-            .iter_mut()
-            .filter(|(sid, _player_history_state)| !players_processed.contains(*sid))
-            .for_each(|(_sid, player_history_state)| {
-                player_history_state.history.clear();
-                player_history_state.pvs_ticks = 0;
-            });
-
-        // TODO: only remove players not in `state.players`
         // Clean up disconnected players
-        self.player_states.retain(|sid, _| current_active_sids.contains(sid));
+        players_to_remove.iter().for_each(|sid| _ = self.player_states.remove(sid));
 
         Ok(tick_detections)
     }
@@ -646,7 +634,6 @@ mod tests {
         }
     }
 
-    // FIX:
     #[test]
     fn test_exact_match_instant_flag() {
         let mut algo = SilentAim::new();
@@ -683,7 +670,6 @@ mod tests {
         assert_eq!(detections[0].data["is_exact_match"], true);
     }
 
-    // FIX:
     #[test]
     fn test_drift_requires_suspicion_threshold() {
         let mut algo = SilentAim::new();
@@ -701,7 +687,8 @@ mod tests {
         for t in 100..105 {
             state.tick = t.into();
             state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
-            let _ = algo.on_tick(&state, &parser_state);
+            let detections = algo.on_tick(&state, &parser_state).unwrap();
+            assert_eq!(detections.len(), 0);
         }
 
         // Flick 1: Peak to 75.0, then snapback to 45.5 (drift = 0.5°)
@@ -719,13 +706,15 @@ mod tests {
         for t in 107..110 {
             state.tick = t.into();
             state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
-            let _ = algo.on_tick(&state, &parser_state);
+            let detections = algo.on_tick(&state, &parser_state).unwrap();
+            assert_eq!(detections.len(), 0);
         }
 
         // Flick 2: Peak to 80.0, then snapback to 45.9 (drift = 0.4°)
         state.tick = 110.into();
         state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 80.0, 20.0, true)];
-        let _ = algo.on_tick(&state, &parser_state);
+        let detections = algo.on_tick(&state, &parser_state).unwrap();
+        assert_eq!(detections.len(), 0);
 
         state.tick = 111.into();
         state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.9, 0.0, true)];
@@ -736,7 +725,6 @@ mod tests {
         assert_eq!(det2[0].data["suspicion_count"], 2);
     }
 
-    // FIX:
     #[test]
     fn test_high_pitch_scout_aim_not_filtered() {
         let mut algo = SilentAim::new();

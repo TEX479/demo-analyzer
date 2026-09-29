@@ -7,7 +7,11 @@ use crate::{
         parameters::{Parameter, Parameters, get_parameter_value},
     },
     util::{
-        helpers::{KeyValueVec, ViewAngle, geometry::viewangle_delta, player_finders::valid_players},
+        helpers::{
+            KeyValueVec, ViewAngle,
+            geometry::viewangle_delta,
+            player_finders::{players_alive_and_in_pvs, valid_players},
+        },
         nocrex::jankguard::JankGuard,
     },
 };
@@ -61,7 +65,7 @@ impl CheatAlgorithm for AngleRepeat {
         let min_first_second_angle_delta: f32 = get_parameter_value(&self.params, "min_first_second_angle_delta")?;
         let max_first_third_angle_delta: f32 = get_parameter_value(&self.params, "max_first_third_angle_delta")?;
 
-        for (player, _info, steam_id) in valid_players(players.iter()) {
+        for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|a| (*t, *a)));
             let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|a| (*t, *a)));
 

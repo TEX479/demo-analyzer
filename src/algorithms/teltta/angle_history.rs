@@ -6,7 +6,10 @@ use crate::{
         parameters::{Parameter, Parameters, get_parameter_value},
     },
     util::{
-        helpers::{KeyValueVec, ViewAngle, player_finders::valid_players},
+        helpers::{
+            KeyValueVec, ViewAngle,
+            player_finders::{players_alive_and_in_pvs, valid_players},
+        },
         nocrex::jankguard::JankGuard,
     },
 };
@@ -60,7 +63,7 @@ impl CheatAlgorithm for AngleHistory {
         self.ticks.insert(0, Default::default());
         self.ticks.truncate(tick_window as usize);
 
-        for (player, _info, steam_id) in valid_players(players.iter()) {
+        for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {

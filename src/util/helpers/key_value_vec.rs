@@ -280,6 +280,20 @@ where
         self.key.swap_remove(index);
         Some(self.value.swap_remove(index))
     }
+
+    /// gets the keys in Self
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::KeyValueVec;
+    /// let mut kv = KeyValueVec::<&str, i32>::new();
+    /// assert_eq!(kv.keys(), &[] as &[&str]);
+    /// kv.insert("Apple", 42);
+    /// assert_eq!(kv.keys(), &["Apple"]);
+    /// ```
+    pub fn keys(&self) -> &[K] {
+        &self.key
+    }
 }
 
 impl<K: Debug, V: Debug> Debug for KeyValueVec<K, V> {

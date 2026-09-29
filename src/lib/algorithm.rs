@@ -86,6 +86,7 @@ pub trait CheatAlgorithm {
 
     fn algorithm_name(&self) -> &str;
 
+    // TODO: find a way to impl mutable params without forcing the slow-ish parsing of params
     fn params(&mut self) -> Option<&mut Parameters> {
         None
     }
