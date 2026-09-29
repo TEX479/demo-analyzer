@@ -32,6 +32,7 @@ pub mod algorithms {
         pub mod psilent4;
         pub mod psilent5;
         pub mod silent_aim;
+        pub mod duckspeed;
     }
 }
 
