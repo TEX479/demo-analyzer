@@ -41,6 +41,33 @@ pub struct ViewAngle {
 impl ViewAngle {
     // TODO: add example
     /// calculate the normalized `Vec3` that points in `ViewAngle`
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::{ViewAngle, Vec3};
+    /// // since floating point operations have rounding, compare using some epsilon
+    /// const EPSILON: f32 = 0.001;
+    /// fn floats_are_equal(f1: f32, f2: f32) -> bool {
+    ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
+    /// }
+    /// fn vecs_equal(v1: Vec3, v2: Vec3) -> bool {
+    ///     floats_are_equal(v1.x, v2.x)
+    ///     && floats_are_equal(v1.y, v2.y)
+    ///     && floats_are_equal(v1.z, v2.z)
+    /// }
+    ///
+    /// let v1 = ViewAngle { yaw: 0.0, pitch: 0.0 }.to_unit_vec();
+    /// let v2 = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
+    /// assert!(vecs_equal(v1, v2));
+    ///
+    /// let v1 = ViewAngle { yaw: 90.0, pitch: 0.0 }.to_unit_vec();
+    /// let v2 = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+    /// assert!(vecs_equal(v1, v2));
+    ///
+    /// let v1 = ViewAngle { yaw: 0.0, pitch: 90.0 }.to_unit_vec();
+    /// let v2 = Vec3 { x: 0.0, y: 0.0, z: -1.0 };
+    /// assert!(vecs_equal(v1, v2));
+    /// ```
     pub fn to_unit_vec(self) -> Vec3 {
         let Self { yaw, pitch } = self;
 
@@ -48,7 +75,7 @@ impl ViewAngle {
         let pitch = pitch.to_radians();
         Vec3 {
             x: pitch.cos() * yaw.cos(),
-            y: pitch.sin() * yaw.sin(),
+            y: pitch.cos() * yaw.sin(),
             z: -pitch.sin(),
         }
     }
