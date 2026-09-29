@@ -4,13 +4,12 @@ use anyhow::{Context, Error};
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
-use tf_demo_parser::demo::vector::Vector;
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
 use crate::util::helpers::player_finders::valid_players;
-use crate::util::helpers::{KeyValueVec, ViewAngle};
+use crate::util::helpers::{KeyValueVec, Vec3, ViewAngle};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const TELEPORT_DIST_SQ: f32 = 256.0 * 256.0;
@@ -19,13 +18,16 @@ const TELEPORT_DIST_SQ: f32 = 256.0 * 256.0;
 struct PlayerSnapshot {
     tick: u32,
     simtime: u16,
-    position: Vector,
+    position: Vec3,
     angle: ViewAngle,
 }
 
 #[derive(Debug, Clone, Default)]
 struct PlayerHistoryState {
     pvs_ticks: u32,
+    /// snapshots of the player
+    ///
+    /// New snapshots are pushed to the front.
     history: VecDeque<PlayerSnapshot>,
     last_update_tick: u32,
     suspicion_count: u32,
@@ -386,7 +388,7 @@ impl CheatAlgorithm for SilentAim {
             let snapshot = PlayerSnapshot {
                 tick: ticknum,
                 simtime: player.simtime,
-                position: player.position,
+                position: player.position.into(),
                 angle: player.into(),
             };
 
@@ -429,22 +431,20 @@ impl CheatAlgorithm for SilentAim {
                 }
 
                 // Verify packet and spatial continuity across each adjacent frame in window
-                for step in 0..lookback_index {
-                    let s_newer = &pstate.history[step];
-                    let s_older = &pstate.history[step + 1];
-
-                    // Packet continuity: max 2 ticks gap between consecutive snapshots
-                    if s_newer.tick.saturating_sub(s_older.tick) > 2 {
-                        continue 'lookback_loop;
-                    }
-
-                    // Spatial continuity: no teleportation between frames
-                    let dx = s_newer.position.x - s_older.position.x;
-                    let dy = s_newer.position.y - s_older.position.y;
-                    let dz = s_newer.position.z - s_older.position.z;
-                    if (dx * dx + dy * dy + dz * dz) > TELEPORT_DIST_SQ {
-                        continue 'lookback_loop;
-                    }
+                let is_uncontinuous = pstate
+                    .history
+                    .iter()
+                    .zip(pstate.history.iter().skip(1))
+                    .take(lookback_index)
+                    .any(|(s_older, s_newer)| {
+                        // Packet continuity: max 2 ticks gap between consecutive snapshots
+                        let tick_uncontinuity = s_newer.tick.saturating_sub(s_older.tick) > 2;
+                        // Spatial continuity: no teleportation between frames
+                        let spatial_uncontinuity = (s_newer.position - s_older.position).length_square() > TELEPORT_DIST_SQ;
+                        tick_uncontinuity || spatial_uncontinuity
+                    });
+                if is_uncontinuous {
+                    continue;
                 }
 
                 // Exclude quantized pitch baseline glitches
@@ -466,8 +466,7 @@ impl CheatAlgorithm for SilentAim {
                 let delta_0_i = current_angle.delta(anchor_angle);
 
                 // Check exact angle match (zero drift or within float quantization epsilon)
-                let is_exact =
-                    delta_0_i <= exact_match_epsilon || (curr_snap.angle.yaw == anchor_snap.angle.yaw && curr_snap.angle.pitch == anchor_snap.angle.pitch);
+                let is_exact = delta_0_i <= exact_match_epsilon || (curr_snap.angle == anchor_snap.angle);
 
                 if !is_exact && delta_0_i > max_delta_first_third {
                     continue;
@@ -475,6 +474,7 @@ impl CheatAlgorithm for SilentAim {
 
                 println!("doing spike-check");
                 // Intermediate spike check: at least one tick strictly between 0 and i must have spiked
+                // TODO: check why we have the inner loop / why check increasingly larger windows
                 for (middle_index, mid_snap) in pstate
                     .history
                     .iter()
@@ -581,6 +581,7 @@ impl CheatAlgorithm for SilentAim {
             }
         }
 
+        // maybe TODO: replace `players_processed` with `current_active_sids`
         self.player_states
             .iter_mut()
             .filter(|(sid, _player_history_state)| !players_processed.contains(*sid))
@@ -589,6 +590,7 @@ impl CheatAlgorithm for SilentAim {
                 player_history_state.pvs_ticks = 0;
             });
 
+        // TODO: only remove players not in `state.players`
         // Clean up disconnected players
         self.player_states.retain(|sid, _| current_active_sids.contains(sid));
 
@@ -612,10 +614,10 @@ mod tests {
         ParserState::new(24, |_| false, false)
     }
 
-    fn create_test_player(entity_id: u32, user_id: u32, steam_id: &str, pos: Vector, yaw: f32, pitch: f32, in_pvs: bool) -> Player {
+    fn create_test_player(entity_id: u32, user_id: u32, steam_id: &str, pos: Vec3, yaw: f32, pitch: f32, in_pvs: bool) -> Player {
         Player {
             entity: EntityId::from(entity_id),
-            position: pos,
+            position: pos.into(),
             health: 125,
             max_health: 125,
             class: Class::Scout,
@@ -660,18 +662,18 @@ mod tests {
         // Pre-fill PVS grace ticks at base angle (45.0, 0.0)
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Tick 105: Flick to (75.0, 15.0) -> peak delta > 30°
         state.tick = 105.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         // Tick 106: Snap back to EXACT SAME (45.0, 0.0)
         state.tick = 106.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
         let detections = algo.on_tick(&state, &parser_state).unwrap();
 
         // Exact match should flag immediately on first flick!
@@ -698,17 +700,17 @@ mod tests {
         // Baseline
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Flick 1: Peak to 75.0, then snapback to 45.5 (drift = 0.5°)
         state.tick = 105.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         state.tick = 106.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
         let det1 = algo.on_tick(&state, &parser_state).unwrap();
         // 1st drift flick should NOT flag yet because suspicion_threshold = 2
         assert_eq!(det1.len(), 0);
@@ -716,17 +718,17 @@ mod tests {
         // Continue baseline
         for t in 107..110 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Flick 2: Peak to 80.0, then snapback to 45.9 (drift = 0.4°)
         state.tick = 110.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 80.0, 20.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 80.0, 20.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         state.tick = 111.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 0.0 }, 45.9, 0.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.9, 0.0, true)];
         let det2 = algo.on_tick(&state, &parser_state).unwrap();
         // 2nd drift flick reaches threshold -> flags!
         assert_eq!(det2.len(), 1);
@@ -750,18 +752,18 @@ mod tests {
         // Pre-fill at steep downward pitch (58.0°) - Scout shooting downward from high ground
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
+            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Flick to (65.0, 60.0) -> peak delta ~ 20°
         state.tick = 105.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 65.0, 60.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 500.0 }, 65.0, 60.0, true)];
         let _ = algo.on_tick(&state, &parser_state);
 
         // Snapback to exact (45.0, 58.0)
         state.tick = 106.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vector { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
+        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
         let detections = algo.on_tick(&state, &parser_state).unwrap();
 
         // Scout aiming downward from high ground MUST NOT be filtered!

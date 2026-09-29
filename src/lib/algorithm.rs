@@ -1,20 +1,16 @@
 // Import algorithm struct here.
 pub use crate::algorithms::{
     all_messages::AllMessages,
+    fidoo::{
+        auto_backstab::AutoBackstab, bunnyhop::BunnyHop, invalid_equip_region::InvalidEquipRegion, nospread::NoSpread, psilent4::Psilent4,
+        silent_aim::SilentAim,
+    },
     nocrex::{aimsnap::AimSnap, angle_repeat::AngleRepeat, oob_pitch::OOBPitch},
     teltta::{angle_history::AngleHistory, backtrack::BackTrack, double_tap::DoubleTap},
     tex::angle_acceleration::AngleAccelerationAnalyzer,
     viewangles_180degrees::ViewAngles180Degrees,
     viewangles_to_csv::ViewAnglesToCSV,
     write_to_file::WriteToFile,
-    fidoo:: {
-        auto_backstab::AutoBackstab,
-        bunnyhop::BunnyHop,
-        invalid_equip_region::InvalidEquipRegion,
-        nospread::NoSpread,
-        psilent4::Psilent4,
-        silent_aim::SilentAim,
-    }
 };
 
 use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
@@ -54,7 +50,6 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(NoSpread::new()),
         Box::new(Psilent4::new()),
         Box::new(SilentAim::new()),
-
     ]
 }
 

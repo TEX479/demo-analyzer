@@ -2,6 +2,7 @@ use crate::base::cheat_analyser_base::{Player, PlayerState};
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::parser::analyser::{UserId, UserInfo};
 
+// TODO: add doc comment
 pub fn valid_players<'a>(players: impl Iterator<Item = &'a Player>) -> impl Iterator<Item = (&'a Player, &'a UserInfo, SteamID)> {
     players
         .filter(|p| p.in_pvs && p.state == PlayerState::Alive)
