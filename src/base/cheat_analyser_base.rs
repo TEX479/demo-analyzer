@@ -59,6 +59,7 @@ impl PlayerState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Player {
     pub entity: EntityId,
+    // TODO: replace using own `Vec3` struct
     pub position: Vector,
     pub health: u16,
     pub max_health: u16,

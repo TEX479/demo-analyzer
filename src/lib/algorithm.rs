@@ -2,8 +2,8 @@
 pub use crate::algorithms::{
     all_messages::AllMessages,
     fidoo::{
-        auto_backstab::AutoBackstab, bunnyhop::BunnyHop, invalid_equip_region::InvalidEquipRegion, nospread::NoSpread, psilent4::Psilent4, psilent5::Psilent5,
-        silent_aim::SilentAim, duckspeed::CrouchSpeed,
+        auto_backstab::AutoBackstab, bunnyhop::BunnyHop, duckspeed::CrouchSpeed, invalid_equip_region::InvalidEquipRegion, nospread::NoSpread,
+        psilent4::Psilent4, psilent5::Psilent5, silent_aim::SilentAim,
     },
     nocrex::{aimsnap::AimSnap, angle_repeat::AngleRepeat, oob_pitch::OOBPitch},
     teltta::{angle_history::AngleHistory, backtrack::BackTrack, double_tap::DoubleTap},
@@ -34,27 +34,22 @@ use crate::{
 
 pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
     vec![
-
         Box::new(AllMessages::new()),
         Box::new(ViewAngles180Degrees::default()),
         Box::new(ViewAnglesToCSV::new()),
         Box::new(WriteToFile::new().expect("could not get new WriteToFile algorithm")),
-
         // nocrex' algorithms
         Box::new(OOBPitch::new()),
         Box::new(AngleRepeat::new()),
         Box::new(AngleHistory::default()),
         Box::new(AimSnap::new()),
         Box::new(AngleRepeat::new()),
-
         // teltta's algorithms
-        Box::new(AngleHistory::new()),
+        Box::new(AngleHistory::default()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
-
         // tex' algorithms
         Box::new(AngleAccelerationAnalyzer::default()),
-
         // fidoo algorithms
         Box::new(AutoBackstab::new()),
         Box::new(InvalidEquipRegion::new()),
@@ -98,6 +93,7 @@ pub fn analyse(demo: &Demo, algorithms: Vec<Box<dyn CheatAlgorithm + Send>>) -> 
 pub trait CheatAlgorithm {
     fn enabled_by_default(&self) -> bool;
 
+    // TODO: check if this can be a `&'static str`
     fn algorithm_name(&self) -> &str;
 
     // TODO: find a way to impl mutable params without forcing the slow-ish parsing of params

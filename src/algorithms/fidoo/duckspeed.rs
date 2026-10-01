@@ -6,20 +6,21 @@ use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::DemoTick;
 use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::parser::analyser::Class;
-use tf_demo_parser::demo::vector::Vector;
 use tf_demo_parser::{MessageType, ParserState};
 
-use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
+use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::util::helpers::Vec3;
+use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const TICK_INTERVAL: f32 = 0.015; // 66.67 Hz standard Source engine tick interval
 
 #[derive(Default, Clone)]
 struct PlayerCrouchSpeedState {
-    prev_pos: Option<Vector>,
-    last_sample_pos: Option<Vector>,
+    prev_pos: Option<Vec3>,
+    last_sample_pos: Option<Vec3>,
     last_sample_tick: u32,
     current_speed_hu_s: f32,
     consecutive_ticks: u32,
@@ -29,7 +30,7 @@ struct PlayerCrouchSpeedState {
 
 pub struct CrouchSpeed {
     params: Parameters,
-    player_states: HashMap<u64, PlayerCrouchSpeedState>,
+    player_states: HashMap<SteamID, PlayerCrouchSpeedState>,
     jg: JankGuard,
 }
 
@@ -40,6 +41,8 @@ impl Default for CrouchSpeed {
 }
 
 impl CrouchSpeed {
+    const ALGORITHM_NAME: &'static str = "fidoo/crouchspeed";
+
     pub fn new() -> Self {
         Self {
             params: HashMap::from([
@@ -79,13 +82,13 @@ impl CrouchSpeed {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for CrouchSpeed {
-    fn default(&self) -> bool {
+impl CheatAlgorithm for CrouchSpeed {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
     fn algorithm_name(&self) -> &str {
-        "fidoo/crouchspeed"
+        Self::ALGORITHM_NAME
     }
 
     fn params(&mut self) -> Option<&mut Parameters> {
@@ -102,23 +105,13 @@ impl<'a> CheatAlgorithm<'a> for CrouchSpeed {
         Ok(())
     }
 
-    fn on_message(
-        &mut self,
-        message: &Message,
-        state: &CheatAnalyserState,
-        parser_state: &ParserState,
-        tick: DemoTick,
-    ) -> Result<Vec<Detection>, Error> {
+    fn on_message(&mut self, message: &Message, state: &CheatAnalyserState, parser_state: &ParserState, tick: DemoTick) -> Result<Vec<Detection>, Error> {
         self.jg.on_message(message, state, parser_state, tick);
         Ok(vec![])
     }
 
-    fn on_tick(
-        &mut self,
-        state: &CheatAnalyserState,
-        _parser_state: &ParserState,
-    ) -> Result<Vec<Detection>, Error> {
-        let enabled: bool = get_parameter_value(&self.params, "enabled");
+    fn on_tick(&mut self, state: &CheatAnalyserState, _parser_state: &ParserState) -> Result<Vec<Detection>, Error> {
+        let enabled: bool = get_parameter_value(&self.params, "enabled").unwrap();
         if !enabled {
             return Ok(vec![]);
         }
@@ -126,35 +119,17 @@ impl<'a> CheatAlgorithm<'a> for CrouchSpeed {
         self.jg.on_tick(state);
         let ticknum = u32::from(state.tick);
 
-        let min_speed: f32 = get_parameter_value(&self.params, "min_speed");
-        let speed_ratio: f32 = get_parameter_value(&self.params, "speed_ratio");
-        let min_consecutive_ticks: i32 = get_parameter_value(&self.params, "min_consecutive_ticks");
-        let max_vertical_speed: f32 = get_parameter_value(&self.params, "max_vertical_speed");
-        let debounce_ticks: i32 = get_parameter_value(&self.params, "debounce_ticks");
-        let algo_name = self.algorithm_name().to_string();
+        let min_speed: f32 = get_parameter_value(&self.params, "min_speed").unwrap();
+        let speed_ratio: f32 = get_parameter_value(&self.params, "speed_ratio").unwrap();
+        let min_consecutive_ticks: i32 = get_parameter_value(&self.params, "min_consecutive_ticks").unwrap();
+        let max_vertical_speed: f32 = get_parameter_value(&self.params, "max_vertical_speed").unwrap();
+        let debounce_ticks: i32 = get_parameter_value(&self.params, "debounce_ticks").unwrap();
 
         let mut detections = Vec::new();
 
-        for player in &state.players {
-            if !player.in_pvs || player.state != PlayerState::Alive {
-                continue;
-            }
-
-            let info = match &player.info {
-                Some(info) if info.steam_id != "BOT" => info,
-                _ => continue,
-            };
-
-            let steam_id = match SteamID::from_steam3(&info.steam_id) {
-                Ok(sid) => u64::from(sid),
-                Err(_) => continue,
-            };
-
+        for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
             // Spawn and teleport grace window (60 ticks)
-            let ticks_since_event = self
-                .jg
-                .teleported(&steam_id, ticknum)
-                .min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
             if ticks_since_event < 60 {
                 self.player_states.remove(&steam_id);
                 continue;
@@ -198,18 +173,14 @@ impl<'a> CheatAlgorithm<'a> for CrouchSpeed {
 
             // Wait at least 4 ticks after entering PVS to establish valid position deltas
             if pstate.pvs_ticks < 4 {
-                pstate.prev_pos = Some(player.position);
-                pstate.last_sample_pos = Some(player.position);
+                pstate.prev_pos = Some(player.position.into());
+                pstate.last_sample_pos = Some(player.position.into());
                 pstate.last_sample_tick = ticknum;
                 continue;
             }
 
             let (dx, dy, dz) = if let Some(prev) = pstate.prev_pos {
-                (
-                    player.position.x - prev.x,
-                    player.position.y - prev.y,
-                    player.position.z - prev.z,
-                )
+                (player.position.x - prev.x, player.position.y - prev.y, player.position.z - prev.z)
             } else {
                 (0.0, 0.0, 0.0)
             };
@@ -231,14 +202,14 @@ impl<'a> CheatAlgorithm<'a> for CrouchSpeed {
                     pstate.current_speed_hu_s = dist_2d / dt;
                 }
 
-                pstate.last_sample_pos = Some(player.position);
+                pstate.last_sample_pos = Some(player.position.into());
                 pstate.last_sample_tick = ticknum;
             } else if ticknum.saturating_sub(pstate.last_sample_tick) > 4 {
                 // If no position packet has arrived for > 4 ticks (60ms), entity is stationary
                 pstate.current_speed_hu_s = 0.0;
             }
 
-            pstate.prev_pos = Some(player.position);
+            pstate.prev_pos = Some(player.position.into());
 
             let is_on_ground = player.is_on_ground();
             let is_ducking = player.is_ducking();
@@ -264,7 +235,7 @@ impl<'a> CheatAlgorithm<'a> for CrouchSpeed {
                         pstate.last_detection_tick = Some(ticknum);
                         detections.push(Detection {
                             tick: ticknum,
-                            algorithm: algo_name.clone(),
+                            algorithm: Self::ALGORITHM_NAME.to_string(),
                             player: steam_id,
                             data: json!({
                                 "speed": (current_speed * 10.0).round() / 10.0,
@@ -292,10 +263,12 @@ impl<'a> CheatAlgorithm<'a> for CrouchSpeed {
 mod tests {
     use super::*;
     use crate::base::cheat_analyser_base::Player;
+    use crate::base::cheat_analyser_base::PlayerState;
     use crate::base::cheat_analyser_base::Team;
     use tf_demo_parser::demo::parser::analyser::UserInfo;
+    use tf_demo_parser::demo::vector::Vector;
 
-    fn make_test_player(steam_id: u64, class: Class) -> Player {
+    fn make_test_player(steam_id: SteamID, class: Class) -> Player {
         Player {
             in_pvs: true,
             state: PlayerState::Alive,
@@ -306,7 +279,7 @@ mod tests {
                 classes: Default::default(),
                 name: "TestSubject".to_string(),
                 user_id: 1u32.into(),
-                steam_id: SteamID::from(steam_id).steam3(),
+                steam_id: steam_id.steam3(),
                 entity_id: 1u32.into(),
                 team: Team::Red,
             }),
@@ -321,7 +294,7 @@ mod tests {
         let mut state = CheatAnalyserState::default();
         let parser_state = ParserState::new(1, |_| true, false);
 
-        let sid = 76561198000000001;
+        let sid = SteamID::from(76561198000000001);
         let mut player = make_test_player(sid, Class::Soldier);
 
         // Tick 100-115: Running standing on ground
@@ -363,7 +336,7 @@ mod tests {
         let mut state = CheatAnalyserState::default();
         let parser_state = ParserState::new(1, |_| true, false);
 
-        let sid = 76561198000000002;
+        let sid = SteamID::from(76561198000000002);
         let mut player = make_test_player(sid, Class::Pyro);
 
         for t in 100..=200 {
@@ -375,6 +348,7 @@ mod tests {
         }
     }
 
+    // FIX: test fails
     #[test]
     fn test_crouchspeed_cheater_triggers_detection() {
         // Cheater with DuckSpeed: Soldier moving at 220 HU/s while crouched on ground for 50 ticks
@@ -382,7 +356,7 @@ mod tests {
         let mut state = CheatAnalyserState::default();
         let parser_state = ParserState::new(1, |_| true, false);
 
-        let sid = 76561198000000003;
+        let sid = SteamID::from(76561198000000003);
         let mut player = make_test_player(sid, Class::Soldier);
 
         let mut triggered = false;
