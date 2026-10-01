@@ -22,7 +22,7 @@ pub fn viewangle_delta(current_angle: ViewAngle, previous_angle: ViewAngle, tick
     (va_delta, pa_delta)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -30,7 +30,7 @@ pub struct Vec3 {
 }
 
 /// a player's view angle
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct ViewAngle {
     /// yaw aka `Player.view_angle` in degrees
     pub yaw: f32,
@@ -115,7 +115,7 @@ impl Vec3 {
     // TODO: add example
     /// performs the dot product with rhs
     #[inline(always)]
-    pub fn dot(self, rhs: Self) -> f32 {
+    pub const fn dot(self, rhs: Self) -> f32 {
         self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
     }
 
@@ -167,8 +167,8 @@ impl Vec3 {
     /// assert!(-EPSILON < length - expected_length && length - expected_length < EPSILON);
     /// ```
     #[inline(always)]
-    pub fn length_square(self) -> f32 {
-        self.x.powi(2) + self.y.powi(2) + self.z.powi(2)
+    pub const fn length_square(self) -> f32 {
+        self.x * self.x + self.y * self.y + self.z * self.z
     }
 }
 
@@ -222,5 +222,15 @@ impl From<Vec3> for tf_demo_parser::demo::vector::Vector {
     fn from(value: Vec3) -> Self {
         let Vec3 { x, y, z } = value;
         Self { x, y, z }
+    }
+}
+
+impl TryFrom<Vec3> for ViewAngle {
+    // TODO: get some real error type
+    type Error = ();
+
+    fn try_from(value: Vec3) -> Result<Self, Self::Error> {
+        // TODO: implement
+        todo!()
     }
 }
