@@ -2,14 +2,10 @@ use analysis_template::{
     SILENT, dev_print,
     lib::{
         algorithm::{CheatAlgorithm, analyse, get_algorithms},
-        parameters::Parameters,
+        parameters::{Config, try_update_algorithm_params},
     },
 };
-use std::{
-    collections::HashMap,
-    env,
-    fs::{self},
-};
+use std::{env, fs};
 
 use anyhow::Error;
 
@@ -69,7 +65,7 @@ fn main() -> Result<(), Error> {
     if let Some(param_file_path) = matches.opt_str("p") {
         dev_print!("Loading parameters from {}:", param_file_path);
         let c = fs::read(param_file_path).expect("Couldn't read parameter file");
-        let config = serde_json::from_slice::<HashMap<String, Parameters>>(&c).expect("Couldn't decode parameter file");
+        let config = serde_json::from_slice::<Config>(&c).expect("Couldn't decode parameter file");
         for algo in algorithms.iter_mut() {
             let algorithm_name: String = algo.algorithm_name().to_owned();
 
@@ -77,20 +73,13 @@ fn main() -> Result<(), Error> {
             if algo_params.is_none() {
                 continue;
             }
-            let algo_params = algo_params.unwrap();
+            let mut algo_params = algo_params.unwrap();
             dev_print!("  {}", algorithm_name);
-            algo_params.iter_mut().for_each(|(k, v)| {
-                if let Some(config_params) = config.get(&algorithm_name) {
-                    if let Some(param_value) = config_params.get(k) {
-                        *v = param_value.clone();
-                        dev_print!("    {} = {:?} (changed)", k, v);
-                    } else {
-                        dev_print!("    {} = {:?} (default)", k, v);
-                    }
-                } else {
-                    dev_print!("    {} = {:?} (default)", k, v);
-                }
-            });
+            if let Some(config_params) = config.get(&algorithm_name) {
+                try_update_algorithm_params(&mut algo_params, config_params);
+            } else {
+                tracing::info!("no config for algorithm {:?} found. using default values: {:?}", algorithm_name, algo_params);
+            }
         }
     }
 

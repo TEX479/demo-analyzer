@@ -335,6 +335,15 @@ where
     }
 }
 
+impl<K, V> IntoIterator for KeyValueVec<K, V> {
+    type Item = (K, V);
+    type IntoIter = std::iter::Zip<std::vec::IntoIter<K>, std::vec::IntoIter<V>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.key.into_iter().zip(self.value)
+    }
+}
+
 /*
 impl<K, V> Serialize for KeyValueVec<K, V>
 where

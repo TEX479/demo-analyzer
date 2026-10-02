@@ -194,8 +194,8 @@ impl CheatAlgorithm for BunnyHop {
                     && near_ground_level;
 
                 if is_ground_bounce {
-                    // Check if 0 ground ticks satisfies the configured max_ground_ticks limit
-                    if 0 <= max_ground_ticks && current_speed >= min_speed {
+                    // TODO: check if `0 <= max_ground_ticks` was meant to do something
+                    if current_speed >= min_speed {
                         pstate.current_streak += 1;
                         pstate.hop_ground_ticks.push(0);
                         pstate.hop_speeds.push(current_speed);

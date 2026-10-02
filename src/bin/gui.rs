@@ -4,7 +4,7 @@ use analysis_template::{
     base::cheat_analyser_base::CheatAnalyser,
     lib::{
         algorithm::{Detection, analyse, get_algorithms},
-        parameters::{Parameter, Parameters},
+        parameters::{Config, SerializableParameter, SerializableParameters, try_update_algorithm_params},
     },
 };
 use eframe::egui;
@@ -22,7 +22,7 @@ fn main() -> eframe::Result {
 
 struct Gui {
     algos: HashMap<String, bool>,
-    params: HashMap<String, Parameters>,
+    config: Config,
     file: Option<std::path::PathBuf>,
     processing: bool,
     detections: HashMap<SteamID, Vec<Detection>>,
@@ -37,29 +37,17 @@ struct Gui {
 
 impl Gui {
     pub fn new() -> Self {
-        let mut params: HashMap<String, Parameters> = HashMap::new();
+        let mut config = Config::new();
         for mut a in get_algorithms().drain(..) {
-            if a.params().is_some() {
-                params.insert(a.algorithm_name().to_string(), a.params().cloned().unwrap());
-            }
-        }
-        if let Ok(data) = std::fs::read_to_string("params.json")
-            && let Ok(saved_params) = serde_json::from_str::<HashMap<String, Parameters>>(&data)
-        {
-            for saved_algo in saved_params {
-                if let Some(algo) = params.get_mut(&saved_algo.0) {
-                    for saved_param in saved_algo.1 {
-                        if let Some(param) = algo.get_mut(saved_param.0.as_str()) {
-                            *param = saved_param.1;
-                        }
-                    }
-                }
+            if let Some(algo_params) = a.params() {
+                let serializable_params: SerializableParameters = algo_params.into_iter().map(|(name, param)| (name, param.into())).collect();
+                config.insert(a.algorithm_name().to_string(), serializable_params);
             }
         }
         let (send, recv) = std::sync::mpsc::channel();
-        Self {
+        let mut gui = Self {
             algos: HashMap::from_iter(get_algorithms().iter().map(|a| (a.algorithm_name().to_string(), a.enabled_by_default()))),
-            params,
+            config,
             file: None,
             processing: false,
             detections: HashMap::new(),
@@ -68,7 +56,13 @@ impl Gui {
             analyser: None,
             recv,
             send,
+        };
+        if let Ok(loaded_config_str) = std::fs::read_to_string("params.json")
+            && let Ok(loaded_config) = serde_json::from_str::<Config>(&loaded_config_str)
+        {
+            gui.update_config(loaded_config);
         }
+        gui
     }
 
     fn analyse(&mut self) {
@@ -81,8 +75,8 @@ impl Gui {
         algorithms.retain(|a| self.algos[a.algorithm_name()]);
 
         for a in algorithms.iter_mut() {
-            if let Some(p) = self.params.get(a.algorithm_name()) {
-                a.params().as_mut().unwrap().clone_from(p);
+            if let (Some(config_params), Some(mut algo_params)) = (self.config.get(a.algorithm_name()), a.params()) {
+                try_update_algorithm_params(&mut algo_params, config_params);
             }
         }
 
@@ -98,6 +92,18 @@ impl Gui {
             .unwrap();
         });
         self.processing = true;
+    }
+
+    // tries to update the internal config based on a config struct
+    //
+    // use this to update the internal config with the config read from a file
+    fn update_config(&mut self, params: Config) {
+        for (algo_name, update_params) in params {
+            let algo_params_to_update = self.config.entry(algo_name.clone()).or_default();
+            for (param_name, param_value) in update_params {
+                algo_params_to_update.insert(param_name, param_value);
+            }
+        }
     }
 }
 
@@ -136,7 +142,7 @@ impl eframe::App for Gui {
                     for algo in self.algos.iter_mut().sorted_by_key(|a| a.0) {
                         ui.horizontal(|ui| {
                             ui.checkbox(algo.1, algo.0);
-                            if *algo.1 && self.params.get(algo.0).is_some_and(|p| !p.is_empty()) && ui.small_button("⚙").clicked() {
+                            if *algo.1 && self.config.get(algo.0).is_some_and(|p| !p.is_empty()) && ui.small_button("⚙").clicked() {
                                 algo_to_configure = Some(algo.0.clone());
                             }
                         });
@@ -150,11 +156,11 @@ impl eframe::App for Gui {
                         ui.horizontal(|ui| {
                             ui.heading("Parameters");
                             if ui.button("Save").clicked() {
-                                std::fs::write("params.json", serde_json::to_vec_pretty(&self.params).unwrap()).unwrap();
+                                std::fs::write("params.json", serde_json::to_vec_pretty(&self.config).unwrap()).unwrap();
                             }
                         });
                         ui.separator();
-                        for (name, params) in self.params.iter_mut().sorted_by_key(|a| a.0) {
+                        for (name, params) in self.config.iter_mut().sorted_by_key(|a| a.0) {
                             if !self.algos[name] {
                                 continue;
                             }
@@ -164,26 +170,28 @@ impl eframe::App for Gui {
                                 h.scroll_to_me(Some(egui::Align::TOP));
                             }
                             ui.separator();
-                            for param in params.iter_mut().sorted_by_key(|p| p.0) {
-                                match param.1 {
-                                    Parameter::Float(f) => {
-                                        ui.horizontal(|ui| {
+                            // TODO: don't sort every frame
+                            for (param_name, param_value) in params.iter_mut().sorted_by_key(|p| p.0) {
+                                ui.horizontal(|ui| {
+                                    match param_value {
+                                        SerializableParameter::Float32(f) => {
                                             ui.add(egui::DragValue::new(f).speed(0.001).max_decimals(50));
-                                            ui.label(param.0);
-                                        });
-                                    }
-                                    Parameter::Int(i) => {
-                                        ui.horizontal(|ui| {
+                                        }
+                                        SerializableParameter::Int32(i) => {
                                             ui.add(egui::DragValue::new(i).speed(1).max_decimals(0));
-                                            ui.label(param.0);
-                                        });
+                                        }
+                                        SerializableParameter::Bool(b) => {
+                                            ui.checkbox(b, "");
+                                        }
+                                        SerializableParameter::Usize(v) => {
+                                            ui.add(egui::DragValue::new(v).speed(1));
+                                        }
+                                        SerializableParameter::Unsigned32(v) => {
+                                            ui.add(egui::DragValue::new(v).speed(1));
+                                        }
                                     }
-                                    Parameter::Bool(b) => {
-                                        ui.horizontal(|ui| {
-                                            ui.checkbox(b, param.0);
-                                        });
-                                    }
-                                }
+                                    ui.label(param_name);
+                                });
                             }
                         }
                     });

@@ -34,6 +34,27 @@ impl Display for ParameterError {
     }
 }
 
+macro_rules! impl_display {
+    ($($variant:ident),+) => {
+        impl Display for SerializableParameter {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $(Self::$variant(v) => write!(f, "{v}"),)+
+                }
+            }
+        }
+        impl<'a> Display for AlgorithmParameter<'a> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $(Self::$variant(v) => write!(f, "{v}"),)+
+                }
+            }
+        }
+    };
+}
+
+impl_display!(Float32, Int32, Bool, Usize, Unsigned32);
+
 impl std::error::Error for ParameterError {}
 
 pub type AlgorithmParameters<'a> = HashMap<String, AlgorithmParameter<'a>>;
@@ -48,7 +69,7 @@ impl<'a> AlgorithmParameter<'a> {
     /// tries to modify the internally saved value
     ///
     /// This can be used to try and set the parameters of an algorithm to values loaded from a config.
-    fn try_modify_value(&'a mut self, set_to: SerializableParameter) -> Result<(), ParameterError> {
+    pub fn try_modify_value(&'a mut self, set_to: SerializableParameter) -> Result<(), ParameterError> {
         match self {
             Self::Float32(v) => {
                 **v = set_to.try_into()?;
@@ -90,6 +111,27 @@ impl<'a> From<AlgorithmParameter<'a>> for SerializableParameter {
             AlgorithmParameter::Usize(v) => Self::Usize(*v),
             AlgorithmParameter::Unsigned32(v) => Self::Unsigned32(*v),
         }
+    }
+}
+
+/// updates `AlgorithmParameters` based on `SerializableParameters`
+///
+/// This uses `tracing` log any changes and errors
+pub fn try_update_algorithm_params<'a>(algo_params: &'a mut AlgorithmParameters<'a>, update_with: &SerializableParameters) {
+    for (name, value) in algo_params.iter_mut() {
+        let Some(update_value) = update_with.get(name) else {
+            tracing::info!("{} = {} (default)", name, value);
+            continue;
+        };
+        match value.try_modify_value(*update_value) {
+            Ok(()) => {
+                // TODO: replace `update_value` with `value`
+                tracing::info!("{} = {} (changed)", name, update_value)
+            }
+            Err(e) => {
+                tracing::error!("could not update {:?} with {:?}: {:?}", name, update_value, e);
+            }
+        };
     }
 }
 
