@@ -3,13 +3,13 @@ use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{
         algorithm::{CheatAlgorithm, Detection},
-        parameters::{Parameter, Parameters, get_parameter_value},
+        parameters::AlgorithmParameters,
     },
+    make_algorithm_params,
     util::helpers::{KeyValueVec, player_finders::player_with_uid},
 };
 use anyhow::Error;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::{
     ParserState,
@@ -23,21 +23,30 @@ pub struct DoubleTap {
     shots: KeyValueVec<SteamID, Shot>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    min_tick_scout: usize,
+    min_tick_heavy: usize,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            min_tick_scout: 17,
+            min_tick_heavy: 3,
+        }
+    }
+}
+
 impl DoubleTap {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("min_tick_scout".to_string(), Parameter::Int(17)),
-                ("min_tick_heavy".to_string(), Parameter::Int(3)),
-            ]),
-            ..Default::default()
-        }
+        Self::default()
     }
 
     fn get_weapon_mapping(&self, weapon_id: u32) -> Option<u32> {
         match weapon_id {
-            16 => get_parameter_value::<i32>(&self.params, "min_tick_scout").ok(),
-            18 => get_parameter_value::<i32>(&self.params, "min_tick_heavy").ok(),
+            16 => Some(self.params.min_tick_scout),
+            18 => Some(self.params.min_tick_heavy),
             _ => None,
         }
         .map(|x| x as u32)
@@ -158,8 +167,9 @@ impl CheatAlgorithm for DoubleTap {
         Ok(vec![])
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [min_tick_scout, min_tick_heavy]);
+        Some(params)
     }
 }
 

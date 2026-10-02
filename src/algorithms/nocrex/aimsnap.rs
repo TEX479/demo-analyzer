@@ -4,8 +4,9 @@ use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{
         algorithm::{CheatAlgorithm, Detection},
-        parameters::{Parameter, Parameters, get_parameter_value},
+        parameters::AlgorithmParameters,
     },
+    make_algorithm_params,
     util::{
         helpers::{
             KeyValueVec, ViewAngle,
@@ -17,7 +18,7 @@ use crate::{
 };
 use anyhow::{Context, Error};
 use serde_json::json;
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
@@ -29,16 +30,26 @@ pub struct AimSnap {
     detections: Vec<Detection>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub noise_min: f32,
+    pub noise_max: f32,
+    pub snap_threshold: f32,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            noise_min: 0.028,
+            noise_max: 0.99,
+            snap_threshold: 10.0,
+        }
+    }
+}
+
 impl AimSnap {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("noise_min".to_string(), Parameter::Float(0.028)),
-                ("noise_max".to_string(), Parameter::Float(0.99)),
-                ("snap_threshold".to_string(), Parameter::Float(10.0)),
-            ]),
-            ..Default::default()
-        }
+        Self::default()
     }
 }
 
@@ -56,9 +67,9 @@ impl CheatAlgorithm for AimSnap {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
-        let noise_min: f32 = get_parameter_value(&self.params, "noise_min")?;
-        let noise_max: f32 = get_parameter_value(&self.params, "noise_max")?;
-        let snap_threshold: f32 = get_parameter_value(&self.params, "snap_threshold")?;
+        let noise_min = self.params.noise_min;
+        let noise_max = self.params.noise_max;
+        let snap_threshold = self.params.snap_threshold;
 
         let noise_range: Range<f32> = noise_min..noise_max;
 
@@ -140,7 +151,8 @@ impl CheatAlgorithm for AimSnap {
         Ok(vec![])
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [noise_min, noise_max, snap_threshold]);
+        Some(params)
     }
 }

@@ -10,7 +10,7 @@ use tf_demo_parser::{MessageType, ParserState};
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
 
 // header is not needed for this algorithm, but is included to serve as an example of how to handle the lifetimes.
 #[allow(dead_code)]
@@ -18,7 +18,7 @@ pub struct AllMessages {
     msg_history: Vec<String>,
     file: Option<File>,
     first_write: bool,
-    params: Parameters,
+    write_batch_size: usize,
 }
 
 impl AllMessages {
@@ -37,7 +37,7 @@ impl AllMessages {
             msg_history: Vec::new(),
             file: None,
             first_write: true,
-            params: HashMap::from([("write_batch_size".to_string(), Parameter::Int(2048))]),
+            write_batch_size: 2048,
         }
     }
 }
@@ -58,10 +58,7 @@ impl CheatAlgorithm for AllMessages {
     }
 
     fn init(&mut self) -> Result<()> {
-        dev_print!(
-            "Initializing AllMessages algorithm with write_batch_size = {}",
-            get_parameter_value::<i32>(&self.params, "write_batch_size")?
-        );
+        dev_print!("Initializing AllMessages algorithm with write_batch_size = {}", self.write_batch_size);
         self.init_file("./output/all_messages.txt")
             .context("could not initialize file `./output/all_messages.txt`")
     }
@@ -83,9 +80,8 @@ impl CheatAlgorithm for AllMessages {
         }
 
         self.msg_history.push(message);
-        let write_batch_size: i32 = get_parameter_value(&self.params, "write_batch_size")?;
 
-        if self.msg_history.len() > write_batch_size as usize {
+        if self.msg_history.len() > self.write_batch_size {
             self.write_messages_to_file().context("could not write message history to file")?;
 
             self.msg_history.clear();
@@ -109,7 +105,12 @@ impl CheatAlgorithm for AllMessages {
         Ok(vec![])
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let mut params = HashMap::new();
+        params.insert(
+            "write_batch_size".to_owned(),
+            crate::lib::parameters::AlgorithmParameter::Usize(&mut self.write_batch_size),
+        );
+        Some(params)
     }
 }

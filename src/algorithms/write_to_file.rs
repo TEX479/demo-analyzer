@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
 
@@ -7,14 +6,15 @@ use tf_demo_parser::ParserState;
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 
 #[allow(dead_code)]
 pub struct WriteToFile {
     state_history: Vec<CheatAnalyserState>,
     file: Option<File>,
     first_write: bool,
-    params: Parameters,
+    write_batch_size: usize,
 }
 
 impl WriteToFile {
@@ -45,13 +45,12 @@ impl WriteToFile {
     }
 
     pub fn new() -> anyhow::Result<WriteToFile> {
-        let params = HashMap::from([("write_batch_size".to_string(), Parameter::Int(1024))]);
-        let write_batch_size: i32 = get_parameter_value(&params, "write_batch_size")?;
+        let write_batch_size = 1024;
         Ok(WriteToFile {
             state_history: Vec::with_capacity(write_batch_size as usize),
             file: None,
             first_write: true,
-            params,
+            write_batch_size: 1024,
         })
     }
 }
@@ -76,8 +75,7 @@ impl CheatAlgorithm for WriteToFile {
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
         self.state_history.push(state.clone());
-        let write_batch_size: i32 = get_parameter_value(&self.params, "write_batch_size")?;
-        if self.state_history.len() > write_batch_size as usize {
+        if self.state_history.len() > self.write_batch_size {
             self.write_states_to_file().context("could not write states to file")?;
         }
 
@@ -96,7 +94,7 @@ impl CheatAlgorithm for WriteToFile {
         Ok(vec![])
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        Some(make_algorithm_params!(self; [write_batch_size]))
     }
 }

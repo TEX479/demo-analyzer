@@ -4,16 +4,17 @@ use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{
         algorithm::{CheatAlgorithm, Detection},
-        parameters::{Parameter, Parameters, get_parameter_value},
+        parameters::AlgorithmParameters,
     },
+    make_algorithm_params,
     util::helpers::player_finders::{players_alive_and_in_pvs, valid_players},
 };
 use anyhow::Error;
 use serde_json::json;
-use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::{ParserState, demo::message::Message};
 
+#[derive(Debug, Clone, Default)]
 pub struct OOBPitch {
     last_detections: Vec<SteamID>,
     server_name: String,
@@ -21,23 +22,24 @@ pub struct OOBPitch {
     params: Parameters,
 }
 
-impl OOBPitch {
-    pub fn new() -> Self {
-        let analyser: OOBPitch = OOBPitch {
-            last_detections: Vec::new(),
-            server_name: "".to_string(),
-            params: HashMap::from([
-                ("min_pitch".to_string(), Parameter::Float(-89.999)),
-                ("max_pitch".to_string(), Parameter::Float(89.999)),
-            ]),
-        };
-        analyser
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub min_pitch: f32,
+    pub max_pitch: f32,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            min_pitch: -89.999,
+            max_pitch: 89.999,
+        }
     }
 }
 
-impl Default for OOBPitch {
-    fn default() -> Self {
-        Self::new()
+impl OOBPitch {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -74,8 +76,8 @@ impl CheatAlgorithm for OOBPitch {
 
             let mut detections = Vec::new();
 
-            let min_pitch: f32 = get_parameter_value(&self.params, "min_pitch")?;
-            let max_pitch: f32 = get_parameter_value(&self.params, "max_pitch")?;
+            let min_pitch = self.params.min_pitch;
+            let max_pitch = self.params.max_pitch;
 
             let is_valve_server = self.server_name.starts_with("Valve Matchmaking Server");
 
@@ -102,7 +104,8 @@ impl CheatAlgorithm for OOBPitch {
         Ok(submitted_detections)
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [min_pitch, max_pitch]);
+        Some(params)
     }
 }

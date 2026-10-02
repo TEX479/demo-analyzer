@@ -1,13 +1,13 @@
 use analysis_template::{
-    PRINT_VOTES, SILENT, dev_print,
+    PRINT_VOTES, SILENT,
     lib::{
         algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, SilentAim, ViewAngles180Degrees},
-        parameters::Parameters,
+        parameters::{Config, try_update_algorithm_params},
     },
     live_analyzer::live_analysis,
 };
 use anyhow::Context;
-use std::{collections::HashMap, path::PathBuf, sync::LazyLock};
+use std::{path::PathBuf, sync::LazyLock};
 use steamlocate::SteamDir;
 use tracing::Level;
 
@@ -77,6 +77,7 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(DoubleTap::new()),
         Box::new(SilentAim::new()),
         // Box::new(AngleAccelerationAnalyzer::default()),
+        Box::new(BunnyHop::new()),
     ];
     config_algorithms_desired(&mut algos);
     algos
@@ -88,28 +89,20 @@ fn config_algorithms_desired(algorithms: &mut Vec<Box<dyn CheatAlgorithm + Send>
     for algo in algorithms.iter_mut() {
         let algorithm_name = algo.algorithm_name().to_owned();
 
-        let Some(algo_params) = algo.params() else {
+        let Some(mut algo_params) = algo.params() else {
             continue;
         };
 
-        dev_print!("  {}", algorithm_name);
-        algo_params.iter_mut().for_each(|(k, v)| {
-            if let Some(config_params) = config.get(&algorithm_name) {
-                if let Some(param_value) = config_params.get(k) {
-                    *v = param_value.clone();
-                    dev_print!("    {} = {:?} (changed)", k, v);
-                } else {
-                    dev_print!("    {} = {:?} (default)", k, v);
-                }
-            } else {
-                dev_print!("    {} = {:?} (default)", k, v);
-            }
-        });
+        let Some(config_params) = config.get(&algorithm_name) else {
+            tracing::info!("no config found for {:?}, using default: {:?}", algorithm_name, algo_params);
+            continue;
+        };
+
+        try_update_algorithm_params(&mut algo_params, config_params);
     }
 }
 
 static CONFIG: LazyLock<Option<Config>> = LazyLock::new(get_config_json);
-type Config = HashMap<String, Parameters>;
 
 fn get_config_json() -> Option<Config> {
     tracing::info!("initializing config");

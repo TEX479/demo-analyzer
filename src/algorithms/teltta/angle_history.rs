@@ -3,8 +3,9 @@ use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{
         algorithm::{CheatAlgorithm, Detection},
-        parameters::{Parameter, Parameters, get_parameter_value},
+        parameters::AlgorithmParameters,
     },
+    make_algorithm_params,
     util::{
         helpers::{
             KeyValueVec, ViewAngle,
@@ -15,10 +16,10 @@ use crate::{
 };
 use anyhow::{Context, Error};
 use serde_json::json;
-use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
+#[derive(Debug, Clone, Default)]
 pub struct AngleHistory {
     ticks: Vec<KeyValueVec<SteamID, ViewAngle>>,
 
@@ -27,17 +28,19 @@ pub struct AngleHistory {
     detections: Vec<Detection>,
 }
 
-impl Default for AngleHistory {
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub tick_window: usize,
+    pub max_delta_first_third: f32,
+    pub min_delta_second_third: f32,
+}
+
+impl Default for Parameters {
     fn default() -> Self {
         Self {
-            ticks: Vec::new(),
-            jg: Default::default(),
-            params: HashMap::from([
-                ("tick_window".to_string(), Parameter::Int(4)),
-                ("max_delta_first_third".to_string(), Parameter::Float(0.5)),
-                ("min_delta_second_third".to_string(), Parameter::Float(10.0)),
-            ]),
-            detections: Vec::new(),
+            tick_window: 4,
+            max_delta_first_third: 0.5,
+            min_delta_second_third: 10.0,
         }
     }
 }
@@ -56,12 +59,12 @@ impl CheatAlgorithm for AngleHistory {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
-        let tick_window: i32 = get_parameter_value(&self.params, "tick_window")?;
-        let max_delta_first_third: f32 = get_parameter_value(&self.params, "max_delta_first_third")?;
-        let min_delta_second_third: f32 = get_parameter_value(&self.params, "min_delta_second_third")?;
+        let tick_window = self.params.tick_window;
+        let max_delta_first_third = self.params.max_delta_first_third;
+        let min_delta_second_third = self.params.min_delta_second_third;
 
         self.ticks.insert(0, Default::default());
-        self.ticks.truncate(tick_window as usize);
+        self.ticks.truncate(tick_window);
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
@@ -148,7 +151,10 @@ impl CheatAlgorithm for AngleHistory {
         Ok(self.detections.clone())
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [
+            tick_window, max_delta_first_third, min_delta_second_third,
+        ]);
+        Some(params)
     }
 }

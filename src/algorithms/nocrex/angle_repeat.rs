@@ -4,8 +4,9 @@ use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{
         algorithm::{CheatAlgorithm, Detection},
-        parameters::{Parameter, Parameters, get_parameter_value},
+        parameters::AlgorithmParameters,
     },
+    make_algorithm_params,
     util::{
         helpers::{
             KeyValueVec, ViewAngle,
@@ -17,7 +18,6 @@ use crate::{
 };
 use anyhow::{Context, Error};
 use serde_json::json;
-use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
@@ -31,16 +31,26 @@ pub struct AngleRepeat {
     detections: Vec<Detection>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub min_angle_diff_ratio: f32,
+    pub min_first_second_angle_delta: f32,
+    pub max_first_third_angle_delta: f32,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            min_angle_diff_ratio: 3.0,
+            min_first_second_angle_delta: 0.0,
+            max_first_third_angle_delta: 0.028,
+        }
+    }
+}
+
 impl AngleRepeat {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("min_angle_diff_ratio".to_string(), Parameter::Float(3.0)),
-                ("min_first_second_angle_delta".to_string(), Parameter::Float(0.0)),
-                ("max_first_third_angle_delta".to_string(), Parameter::Float(0.028)),
-            ]),
-            ..Default::default()
-        }
+        Self::default()
     }
 }
 
@@ -61,9 +71,9 @@ impl CheatAlgorithm for AngleRepeat {
         self.ticks.insert(0, (ticknum, KeyValueVec::default()));
         self.ticks.truncate(3);
 
-        let min_angle_diff_ratio: f32 = get_parameter_value(&self.params, "min_angle_diff_ratio")?;
-        let min_first_second_angle_delta: f32 = get_parameter_value(&self.params, "min_first_second_angle_delta")?;
-        let max_first_third_angle_delta: f32 = get_parameter_value(&self.params, "max_first_third_angle_delta")?;
+        let min_angle_diff_ratio = self.params.min_angle_diff_ratio;
+        let min_first_second_angle_delta = self.params.min_first_second_angle_delta;
+        let max_first_third_angle_delta = self.params.max_first_third_angle_delta;
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|a| (*t, *a)));
@@ -137,8 +147,9 @@ impl CheatAlgorithm for AngleRepeat {
         Ok(self.detections.clone())
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [min_angle_diff_ratio, min_first_second_angle_delta, max_first_third_angle_delta]);
+        Some(params)
     }
 }
 

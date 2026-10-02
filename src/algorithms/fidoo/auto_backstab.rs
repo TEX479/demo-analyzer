@@ -1,6 +1,7 @@
+// TODO: replace all `as u32` casts that are unnecessary
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
@@ -13,7 +14,8 @@ use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::handle_to_entid;
 use crate::util::helpers::player_finders::player_with_uid;
 use crate::util::nocrex::jankguard::JankGuard;
@@ -86,6 +88,7 @@ struct BackstabRecord {
     data: serde_json::Value,
 }
 
+#[derive(Default)]
 pub struct AutoBackstab {
     params: Parameters,
     jg: JankGuard,
@@ -97,41 +100,50 @@ pub struct AutoBackstab {
     detections: Vec<Detection>,
 }
 
-impl Default for AutoBackstab {
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub max_instant_trigger_ticks: usize,
+    pub fleeting_window_max_ticks: usize,
+    pub fleeting_reaction_max_ticks: usize,
+    pub min_stabs_aggregate: usize,
+    pub max_mean_reaction_ticks: f32,
+    pub max_std_dev_ticks: f32,
+    pub min_tracking_ticks: usize,
+    pub tracking_fov_threshold: f32,
+    pub tracking_lookback_ticks: usize,
+    pub aimbot_snap_threshold: f32,
+    pub teleport_distance_threshold: f32,
+    pub max_teleport_distance: f32,
+    pub impossible_angle_threshold: f32,
+    pub blind_fov_threshold: f32,
+    pub preswing_check_ticks: usize,
+}
+
+impl Default for Parameters {
     fn default() -> Self {
-        Self::new()
+        Self {
+            max_instant_trigger_ticks: 1,
+            fleeting_window_max_ticks: 3,
+            fleeting_reaction_max_ticks: 2,
+            min_stabs_aggregate: 3,
+            max_mean_reaction_ticks: 1.5,
+            max_std_dev_ticks: 0.8,
+            min_tracking_ticks: 4,
+            tracking_fov_threshold: 60.0,
+            tracking_lookback_ticks: 15,
+            aimbot_snap_threshold: 40.0,
+            teleport_distance_threshold: 180.0,
+            max_teleport_distance: 600.0,
+            impossible_angle_threshold: 115.0,
+            blind_fov_threshold: 85.0,
+            preswing_check_ticks: 3,
+        }
     }
 }
 
 impl AutoBackstab {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                ("max_instant_trigger_ticks".to_string(), Parameter::Int(1)),
-                ("fleeting_window_max_ticks".to_string(), Parameter::Int(3)),
-                ("fleeting_reaction_max_ticks".to_string(), Parameter::Int(2)),
-                ("min_stabs_aggregate".to_string(), Parameter::Int(3)),
-                ("max_mean_reaction_ticks".to_string(), Parameter::Float(1.5)),
-                ("max_std_dev_ticks".to_string(), Parameter::Float(0.8)),
-                ("min_tracking_ticks".to_string(), Parameter::Int(4)),
-                ("tracking_fov_threshold".to_string(), Parameter::Float(60.0)),
-                ("tracking_lookback_ticks".to_string(), Parameter::Int(15)),
-                ("aimbot_snap_threshold".to_string(), Parameter::Float(40.0)),
-                ("teleport_distance_threshold".to_string(), Parameter::Float(180.0)),
-                ("max_teleport_distance".to_string(), Parameter::Float(600.0)),
-                ("impossible_angle_threshold".to_string(), Parameter::Float(115.0)),
-                ("blind_fov_threshold".to_string(), Parameter::Float(85.0)),
-                ("preswing_check_ticks".to_string(), Parameter::Int(3)),
-            ]),
-            jg: JankGuard::default(),
-            spy_states: HashMap::new(),
-            knife_entities: HashMap::new(),
-            player_histories: HashMap::new(),
-            backstab_records: HashMap::new(),
-            logged_detections: HashSet::new(),
-            detections: Vec::new(),
-        }
+        Self::default()
     }
 
     fn update_spy_ready_state(&mut self, sid: SteamID, is_ready: bool, tick: u32) {
@@ -209,27 +221,23 @@ impl AutoBackstab {
     }
 
     /// Check if the Spy maintained visual tracking of the victim prior to the attack
-    fn check_prior_tracking(&self, spy_sid: SteamID, victim_sid: SteamID, t_ref: u32) -> anyhow::Result<(bool, f32, f32)> {
+    fn check_prior_tracking(&self, spy_sid: SteamID, victim_sid: SteamID, t_ref: u32) -> (bool, f32, f32) {
         let Some(spy_history) = self.player_histories.get(&spy_sid) else {
-            return Ok((false, 0.0, 0.0));
+            return (false, 0.0, 0.0);
         };
         let Some(victim_history) = self.player_histories.get(&victim_sid) else {
-            return Ok((false, 0.0, 0.0));
+            return (false, 0.0, 0.0);
         };
 
-        let lookback_ticks = get_parameter_value::<i32>(&self.params, "tracking_lookback_ticks")
-            .context("\"tracking_lookback_ticks\" must be a valid value")?
-            .max(5) as u32;
-        let fov_threshold = get_parameter_value::<f32>(&self.params, "tracking_fov_threshold").context("\"tracking_fov_threshold\" must be a valid value")?;
-        let min_tracking = get_parameter_value::<i32>(&self.params, "min_tracking_ticks")
-            .context("\"min_tracking_ticks\" must be a valid value")?
-            .max(1) as u32;
+        let lookback_ticks = self.params.tracking_lookback_ticks.max(5) as u32;
+        let fov_threshold = self.params.tracking_fov_threshold;
+        let min_tracking = self.params.min_tracking_ticks.max(1) as u32;
 
         let start_tick = t_ref.saturating_sub(lookback_ticks);
         let end_tick = t_ref.saturating_sub(1);
 
         if end_tick < start_tick {
-            return Ok((false, 0.0, 0.0));
+            return (false, 0.0, 0.0);
         }
 
         let mut valid_tracking_ticks = 0u32;
@@ -264,7 +272,7 @@ impl AutoBackstab {
 
         let had_recent_alignment = total_ticks > 0 && last_fov <= 45.0;
         let had_tracking = valid_tracking_ticks >= min_tracking && had_recent_alignment;
-        Ok((had_tracking, avg_fov, last_fov))
+        (had_tracking, avg_fov, last_fov)
     }
 
     /// Check if the victim was moving in the 10 ticks before the attack
@@ -289,12 +297,12 @@ impl AutoBackstab {
     }
 
     /// Detect abrupt aimbot flick / snap within 5 ticks of the attack
-    fn detect_aimbot_snap(&self, spy_sid: SteamID, t_attack: u32) -> anyhow::Result<(bool, f32)> {
+    fn detect_aimbot_snap(&self, spy_sid: SteamID, t_attack: u32) -> (bool, f32) {
         let Some(spy_history) = self.player_histories.get(&spy_sid) else {
-            return Ok((false, 0.0));
+            return (false, 0.0);
         };
 
-        let snap_threshold = get_parameter_value::<f32>(&self.params, "aimbot_snap_threshold").context("\"aimbot_snap_threshold\" must be a valid value")?;
+        let snap_threshold = self.params.aimbot_snap_threshold;
         let start_tick = t_attack.saturating_sub(5);
 
         let snaps: Vec<_> = spy_history.iter().filter(|s| s.tick >= start_tick && s.tick <= t_attack).collect();
@@ -308,7 +316,7 @@ impl AutoBackstab {
             }
         }
 
-        Ok((max_flick >= snap_threshold, max_flick))
+        (max_flick >= snap_threshold, max_flick)
     }
 
     /// Calculate approach quality score (0.0 = bot-like, 1.0 = human-like)
@@ -339,8 +347,25 @@ impl CheatAlgorithm for AutoBackstab {
         "fidoo/auto_backstab"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [
+            max_instant_trigger_ticks,
+            fleeting_window_max_ticks,
+            fleeting_reaction_max_ticks,
+            min_stabs_aggregate,
+            max_mean_reaction_ticks,
+            max_std_dev_ticks,
+            min_tracking_ticks,
+            tracking_fov_threshold,
+            tracking_lookback_ticks,
+            aimbot_snap_threshold,
+            teleport_distance_threshold,
+            max_teleport_distance,
+            impossible_angle_threshold,
+            blind_fov_threshold,
+            preswing_check_ticks,
+        ]);
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
@@ -528,9 +553,7 @@ impl CheatAlgorithm for AutoBackstab {
                         let reaction_ticks = t_ready_opt.map(|t_r| t_attack.saturating_sub(t_r));
                         let reaction_time_ms = reaction_ticks.map(|r| r as f32 * 15.0);
 
-                        let preswing_check_ticks = get_parameter_value::<i32>(&self.params, "preswing_check_ticks")
-                            .context("\"preswing_check_ticks\" must be a valid value")?
-                            .max(0) as u32;
+                        let preswing_check_ticks = self.params.preswing_check_ticks as u32;
 
                         let was_preswinging = if let Some(t_r) = t_ready_opt {
                             tracker
@@ -542,28 +565,18 @@ impl CheatAlgorithm for AutoBackstab {
                         };
 
                         let t_ref = t_ready_opt.unwrap_or(t_attack);
-                        let (had_tracking, avg_fov, _last_fov) = self.check_prior_tracking(attacker_sid, victim_sid, t_ref)?;
+                        let (had_tracking, avg_fov, _last_fov) = self.check_prior_tracking(attacker_sid, victim_sid, t_ref);
                         let victim_moving = self.check_victim_movement(victim_sid, t_attack);
-                        let (had_snap, flick_2tick) = self.detect_aimbot_snap(attacker_sid, t_attack)?;
+                        let (had_snap, flick_2tick) = self.detect_aimbot_snap(attacker_sid, t_attack);
                         let approach_quality = self.calculate_approach_quality(had_tracking, victim_moving, had_snap, avg_fov);
 
-                        let max_instant = get_parameter_value::<i32>(&self.params, "max_instant_trigger_ticks")
-                            .context("\"max_instant_trigger_ticks\" must be a valid value")?
-                            .max(0) as u32;
-                        let fleeting_max = get_parameter_value::<i32>(&self.params, "fleeting_window_max_ticks")
-                            .context("\"fleeting_window_max_ticks\" must be a valid value")?
-                            .max(0) as u32;
-                        let fleeting_reaction_max = get_parameter_value::<i32>(&self.params, "fleeting_reaction_max_ticks")
-                            .context("\"fleeting_reaction_max_ticks\" must be a valid value")?
-                            .max(0) as u32;
-                        let teleport_dist_thresh = get_parameter_value::<f32>(&self.params, "teleport_distance_threshold")
-                            .context("\"teleport_distance_threshold\" must be a valid value")?;
-                        let max_teleport_dist =
-                            get_parameter_value::<f32>(&self.params, "max_teleport_distance").context("\"max_teleport_distance\" must be a valid value")?;
-                        let imp_angle_thresh = get_parameter_value::<f32>(&self.params, "impossible_angle_threshold")
-                            .context("\"impossible_angle_threshold\" must be a valid value")?;
-                        let blind_fov_thresh =
-                            get_parameter_value::<f32>(&self.params, "blind_fov_threshold").context("\"blind_fov_threshold\" must be a valid value")?;
+                        let max_instant = self.params.max_instant_trigger_ticks as u32;
+                        let fleeting_max = self.params.fleeting_window_max_ticks as u32;
+                        let fleeting_reaction_max = self.params.fleeting_reaction_max_ticks as u32;
+                        let teleport_dist_thresh = self.params.teleport_distance_threshold;
+                        let max_teleport_dist = self.params.max_teleport_distance;
+                        let imp_angle_thresh = self.params.impossible_angle_threshold;
+                        let blind_fov_thresh = self.params.blind_fov_threshold;
 
                         // 1. Instant trigger strike: Verified readiness window <= max_instant without prior tracking
                         let is_instant_trigger =
@@ -708,12 +721,9 @@ impl CheatAlgorithm for AutoBackstab {
     }
 
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
-        let min_stabs_aggregate = get_parameter_value::<i32>(&self.params, "min_stabs_aggregate")
-            .context("\"min_stabs_aggregate\" must be a valid value")?
-            .max(1) as usize;
-        let max_mean_reaction =
-            get_parameter_value::<f32>(&self.params, "max_mean_reaction_ticks").context("\"max_mean_reaction_ticks\" must be a valid value")?;
-        let max_std_dev = get_parameter_value::<f32>(&self.params, "max_std_dev_ticks").context("\"max_std_dev_ticks\" must be a valid value")?;
+        let min_stabs_aggregate = self.params.min_stabs_aggregate.max(1);
+        let max_mean_reaction = self.params.max_mean_reaction_ticks;
+        let max_std_dev = self.params.max_std_dev_ticks;
 
         let mut aggregate_detections = Vec::new();
 

@@ -137,9 +137,7 @@ where
     /// ```
     /// # use analysis_template::util::helpers::KeyValueVec;
     /// let mut kv = KeyValueVec::new();
-    /// assert_eq!(kv.insert("some key", 42), None);
-    /// assert_eq!(kv.insert("some key", 69), Some(42));
-    /// ```
+    /// assert_eq!(kv.insert("some key", 42), None); assert_eq!(kv.insert("some key", 69), Some(42)); ```
     #[must_use]
     pub fn insert(&mut self, key: K, value: V) -> Option<V>
     where
@@ -318,4 +316,52 @@ impl<K, V> Default for KeyValueVec<K, V> {
             value: Vec::new(),
         }
     }
+}
+
+impl<K, V> TryFrom<Vec<(K, V)>> for KeyValueVec<K, V>
+where
+    K: Eq,
+{
+    type Error = KeyValueBuilderError;
+
+    fn try_from(value: Vec<(K, V)>) -> Result<Self, Self::Error> {
+        let mut kv = Self::default();
+        for (k, v) in value.into_iter() {
+            if let Some(_value_already_at_key) = kv.insert(k, v) {
+                return Err(Self::Error::MultipleEqualKeys);
+            }
+        }
+        Ok(kv)
+    }
+}
+
+impl<K, V> IntoIterator for KeyValueVec<K, V> {
+    type Item = (K, V);
+    type IntoIter = std::iter::Zip<std::vec::IntoIter<K>, std::vec::IntoIter<V>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.key.into_iter().zip(self.value)
+    }
+}
+
+/*
+impl<K, V> Serialize for KeyValueVec<K, V>
+where
+    K: Serialize,
+    V: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // TODO: decide if this should serialize keys & values seperately, or as one `Vec<(K, V)>`
+        let mut kv_serializer = serializer.serialize_struct("KeyValueVec", 1)?;
+        kv_serializer.serialize_field("elements", &elements);
+    }
+}
+// */
+
+#[derive(Debug, Clone)]
+pub enum KeyValueBuilderError {
+    MultipleEqualKeys,
 }

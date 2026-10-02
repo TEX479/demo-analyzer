@@ -4,10 +4,10 @@ use std::fs::File;
 use std::io::Write;
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
-use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
 use crate::util::helpers::geometry::{ViewAngle, viewangle_delta};
+use crate::{dev_print, make_algorithm_params};
 use anyhow::{Context, Error};
 use tf_demo_parser::ParserState;
 
@@ -15,7 +15,7 @@ pub struct ViewAnglesToCSV {
     file: Option<File>,
     previous: Option<CheatAnalyserState>,
     history: Vec<Record>,
-    params: Parameters,
+    write_batch_size: usize,
 }
 
 struct Record {
@@ -47,7 +47,7 @@ impl ViewAnglesToCSV {
             file: None,
             previous: None,
             history: Vec::new(),
-            params: HashMap::from([("write_batch_size".to_string(), Parameter::Int(2048))]),
+            write_batch_size: 2048,
         };
         writer
     }
@@ -184,15 +184,13 @@ impl CheatAlgorithm for ViewAnglesToCSV {
 
             sorted_steamids.sort();
 
-            let write_batch_size: i32 = get_parameter_value(&self.params, "write_batch_size")?;
-
             // ...and then by tick
             for steam_id in sorted_steamids {
                 let records = record_dict.get_mut(&steam_id).context(format!("invalid steam_id3: {:?}", steam_id))?;
                 records.sort_by_key(|a| a.tick);
 
                 // write in batches to balance perf and memory usage
-                for chunk in records.chunks(write_batch_size as usize) {
+                for chunk in records.chunks(self.write_batch_size) {
                     writeln!(dest, "{}", chunk.iter().map(|r| r.to_string()).collect::<Vec<String>>().join("\n"))
                         .context(format!("could not write chunks to {:?}", dest))?;
 
@@ -204,7 +202,8 @@ impl CheatAlgorithm for ViewAnglesToCSV {
         Ok(vec![])
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self; [write_batch_size]);
+        Some(params)
     }
 }
