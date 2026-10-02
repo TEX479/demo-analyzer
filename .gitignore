@@ -23,6 +23,9 @@ Cargo.lock
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# vscode sucks ass and decided to generate this folder the one time I launched it.
+.vscode/
+
 # Added by cargo
 
 /target
