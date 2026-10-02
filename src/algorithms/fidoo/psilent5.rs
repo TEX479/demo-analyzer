@@ -1,3 +1,4 @@
+// TODO: refactor more
 use std::collections::{HashMap, VecDeque};
 
 use anyhow::Error;
@@ -11,7 +12,8 @@ use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::geometry::viewangle_delta;
 use crate::util::helpers::{Vec3, ViewAngle, handle_to_entid};
 
@@ -24,7 +26,7 @@ const EYE_HEIGHTS: [f32; 6] = [45.0, 50.0, 56.0, 62.0, 68.0, 72.0];
 // Candidate target convergence distances in Hammer Units
 const CANDIDATE_DISTANCES: [f32; 9] = [24.0, 48.0, 96.0, 192.0, 384.0, 768.0, 1536.0, 2000.0, 4000.0];
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct PlayerSnapshot {
     tick: u32,
     position: Vec3,
@@ -49,6 +51,7 @@ impl PlayerSnapshot {
     }
 }
 
+#[derive(Debug, Clone)]
 struct LaunchCandidate {
     tick: u32,
     player: SteamID,
@@ -65,12 +68,14 @@ struct LaunchCandidate {
     pipe_type: Option<i64>,
 }
 
+#[derive(Debug, Clone)]
 struct TentativeDetection {
     detection: Detection,
     projectile_entity: u32,
     serial: u32,
 }
 
+#[derive(Debug, Clone)]
 pub struct Psilent5 {
     histories: HashMap<SteamID, VecDeque<PlayerSnapshot>>,
     pending: Vec<LaunchCandidate>,
@@ -79,22 +84,30 @@ pub struct Psilent5 {
     params: Parameters,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub angle_threshold: f32,
+    pub lookaround_ticks: u32,
+    pub max_owner_distance: f32,
+    pub minimum_samples: usize,
+    pub minimum_suspicious_launches: usize,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            angle_threshold: 6.0,
+            lookaround_ticks: 18,
+            max_owner_distance: 115.0,
+            minimum_samples: 2,
+            minimum_suspicious_launches: 2,
+        }
+    }
+}
+
 impl Psilent5 {
     pub fn new() -> Self {
-        Self {
-            histories: HashMap::new(),
-            pending: Vec::new(),
-            tentative: Vec::new(),
-            observations: HashMap::new(),
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                ("angle_threshold".to_string(), Parameter::Float(6.0)),
-                ("lookaround_ticks".to_string(), Parameter::Int(18)),
-                ("max_owner_distance".to_string(), Parameter::Float(115.0)),
-                ("minimum_samples".to_string(), Parameter::Int(2)),
-                ("minimum_suspicious_launches".to_string(), Parameter::Int(2)),
-            ]),
-        }
+        Self::default()
     }
 
     fn record_state(&mut self, state: &CheatAnalyserState) {
@@ -130,7 +143,7 @@ impl Psilent5 {
     }
 
     fn resolve_pending(&mut self, current_tick: u32, flush: bool) -> Vec<TentativeDetection> {
-        let lookaround_ticks = get_parameter_value::<i32>(&self.params, "lookaround_ticks").unwrap().max(0) as u32;
+        let lookaround_ticks = self.params.lookaround_ticks;
         let mut waiting = Vec::new();
         let mut detections = Vec::new();
 
@@ -161,7 +174,13 @@ impl Psilent5 {
 
 impl Default for Psilent5 {
     fn default() -> Self {
-        Self::new()
+        Self {
+            histories: HashMap::new(),
+            pending: Vec::new(),
+            tentative: Vec::new(),
+            observations: HashMap::new(),
+            params: Parameters::default(),
+        }
     }
 }
 
@@ -174,8 +193,15 @@ impl CheatAlgorithm for Psilent5 {
         "fidoo/psilent5"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters> {
+        let params = make_algorithm_params!(self.params; [
+            angle_threshold,
+            lookaround_ticks,
+            max_owner_distance,
+            minimum_samples,
+            minimum_suspicious_launches,
+        ]);
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
@@ -264,7 +290,7 @@ impl CheatAlgorithm for Psilent5 {
             }
             let pipe_type = projectile_integer(&props, &[("DT_TFProjectile_Pipebomb", "m_iType")]);
 
-            let max_owner_distance = get_parameter_value::<f32>(&self.params, "max_owner_distance").unwrap();
+            let max_owner_distance = self.params.max_owner_distance;
             let offset = origin - player.position.into();
             let owner_distance = offset.length();
             if !owner_distance.is_finite() || owner_distance > max_owner_distance {
@@ -322,7 +348,7 @@ impl CheatAlgorithm for Psilent5 {
             }
         }
 
-        let minimum_launches = get_parameter_value::<i32>(&self.params, "minimum_suspicious_launches").unwrap().max(1) as usize;
+        let minimum_launches = self.params.minimum_suspicious_launches;
         let mut launch_counts = HashMap::<SteamID, usize>::new();
         for (player, _, _) in unique.keys() {
             *launch_counts.entry(*player).or_default() += 1;
@@ -349,9 +375,9 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         return None;
     }
 
-    let angle_threshold = get_parameter_value::<f32>(params, "angle_threshold").unwrap();
-    let lookaround_ticks = get_parameter_value::<i32>(params, "lookaround_ticks").unwrap().max(0) as u32;
-    let minimum_samples = get_parameter_value::<i32>(params, "minimum_samples").unwrap().max(1) as usize;
+    let angle_threshold = params.angle_threshold;
+    let lookaround_ticks = params.lookaround_ticks;
+    let minimum_samples = params.minimum_samples;
     let history = histories.get(&candidate.player)?;
     let ping_ticks = ((candidate.player_ping as f32 / 15.0).round() as u32).min(20);
     let effective_lookaround = (lookaround_ticks + ping_ticks).max(18).min(32);

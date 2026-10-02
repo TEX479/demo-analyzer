@@ -1,3 +1,4 @@
+// TODO: refactor more
 use std::collections::HashMap;
 
 use anyhow::Error;
@@ -10,14 +11,15 @@ use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::Vec3;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const TICK_INTERVAL: f32 = 0.015; // 66.67 Hz standard Source engine tick interval
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 struct PlayerCrouchSpeedState {
     prev_pos: Option<Vec3>,
     last_sample_pos: Option<Vec3>,
@@ -28,15 +30,39 @@ struct PlayerCrouchSpeedState {
     last_detection_tick: Option<u32>,
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct CrouchSpeed {
     params: Parameters,
     player_states: HashMap<SteamID, PlayerCrouchSpeedState>,
     jg: JankGuard,
 }
 
-impl Default for CrouchSpeed {
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    /// absolute minimum speed in HammerUnits per seconds (`HU/s`)
+    /// Absolute max legitimate crouch speed in TF2 (BFB Scout at 520 boost) is 520/3 = 173.33 HU/s.
+    /// All normal classes crouch at 77-133 HU/s. Cheaters with DuckSpeed move at 200-350+ HU/s.
+    pub min_speed: f32,
+    /// Minimum fraction of class standing base speed (e.g. 0.55 * 400 = 220 HU/s for Scout)
+    pub speed_ratio: f32,
+    /// Minimum consecutive on-ground crouched fast-moving ticks required to flag (45 ticks ~= 0.68s).
+    /// C-tap is 1-2 ticks; rocket jump landings slide for <20 ticks; running into duck decelerates in <20 ticks.
+    pub min_consecutive_ticks: usize,
+    /// Vertical speed limit: downward slides/falls on steep slopes are ignored
+    pub max_vertical_speed: f32,
+    /// Ticks between detections for the same player
+    pub debounce_ticks: usize,
+}
+
+impl Default for Parameters {
     fn default() -> Self {
-        Self::new()
+        Self {
+            min_speed: 180.0,
+            speed_ratio: 0.55,
+            min_consecutive_ticks: 45,
+            max_vertical_speed: 100.0,
+            debounce_ticks: 66,
+        }
     }
 }
 
@@ -45,24 +71,8 @@ impl CrouchSpeed {
 
     pub fn new() -> Self {
         Self {
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                // Absolute minimum speed (HU/s).
-                // Absolute max legitimate crouch speed in TF2 (BFB Scout at 520 boost) is 520/3 = 173.33 HU/s.
-                // All normal classes crouch at 77-133 HU/s. Cheaters with DuckSpeed move at 200-350+ HU/s.
-                ("min_speed".to_string(), Parameter::Float(180.0)),
-                // Minimum fraction of class standing base speed (e.g. 0.55 * 400 = 220 HU/s for Scout)
-                ("speed_ratio".to_string(), Parameter::Float(0.55)),
-                // Minimum consecutive on-ground crouched fast-moving ticks required to flag (45 ticks ~= 0.68s).
-                // C-tap is 1-2 ticks; rocket jump landings slide for <20 ticks; running into duck decelerates in <20 ticks.
-                ("min_consecutive_ticks".to_string(), Parameter::Int(45)),
-                // Vertical speed limit: downward slides/falls on steep slopes are ignored
-                ("max_vertical_speed".to_string(), Parameter::Float(100.0)),
-                // Ticks between detections for the same player
-                ("debounce_ticks".to_string(), Parameter::Int(66)),
-            ]),
             player_states: HashMap::with_capacity(32),
-            jg: JankGuard::default(),
+            ..Default::default()
         }
     }
 
@@ -91,8 +101,11 @@ impl CheatAlgorithm for CrouchSpeed {
         Self::ALGORITHM_NAME
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters> {
+        let params = make_algorithm_params!(self.params; [
+            min_speed, speed_ratio, min_consecutive_ticks, max_vertical_speed, debounce_ticks
+        ]);
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
@@ -111,19 +124,14 @@ impl CheatAlgorithm for CrouchSpeed {
     }
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _parser_state: &ParserState) -> Result<Vec<Detection>, Error> {
-        let enabled: bool = get_parameter_value(&self.params, "enabled").unwrap();
-        if !enabled {
-            return Ok(vec![]);
-        }
-
         self.jg.on_tick(state);
         let ticknum = u32::from(state.tick);
 
-        let min_speed: f32 = get_parameter_value(&self.params, "min_speed").unwrap();
-        let speed_ratio: f32 = get_parameter_value(&self.params, "speed_ratio").unwrap();
-        let min_consecutive_ticks: i32 = get_parameter_value(&self.params, "min_consecutive_ticks").unwrap();
-        let max_vertical_speed: f32 = get_parameter_value(&self.params, "max_vertical_speed").unwrap();
-        let debounce_ticks: i32 = get_parameter_value(&self.params, "debounce_ticks").unwrap();
+        let min_speed = self.params.min_speed;
+        let speed_ratio = self.params.speed_ratio;
+        let min_consecutive_ticks = self.params.min_consecutive_ticks;
+        let max_vertical_speed = self.params.max_vertical_speed;
+        let debounce_ticks = self.params.debounce_ticks;
 
         let mut detections = Vec::new();
 

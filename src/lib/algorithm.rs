@@ -47,8 +47,6 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(AngleHistory::default()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
-        // tex' algorithms
-        Box::new(AngleAccelerationAnalyzer::default()),
         // fidoo algorithms
         Box::new(AutoBackstab::new()),
         Box::new(InvalidEquipRegion::new()),

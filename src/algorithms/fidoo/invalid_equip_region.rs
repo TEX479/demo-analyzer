@@ -1,3 +1,4 @@
+// TODO: refactor more
 use anyhow::Error;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -449,6 +450,7 @@ mod tests {
         assert!(res.is_empty(), "Community server should be skipped when valve_servers_only is true");
     }
 
+    // FIX: test failing
     #[test]
     fn test_valve_servers_only_filter_disabled_community() {
         let mut algo = InvalidEquipRegion {
@@ -513,6 +515,7 @@ mod tests {
         assert_eq!(res[0].data["server_name"], "UGC.TF | Trade #11 | FREE ITEMS!");
     }
 
+    // FIX: failing test
     #[test]
     fn test_valve_servers_only_valve_server() {
         let mut algo = InvalidEquipRegion {
