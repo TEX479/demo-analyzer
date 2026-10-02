@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
@@ -8,11 +8,12 @@ use tf_demo_parser::demo::vector::Vector;
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::nocrex::jankguard::JankGuard;
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 struct PlayerBhopState {
     ground_ticks: u32,
     air_ticks: u32,
@@ -31,6 +32,15 @@ struct PlayerBhopState {
     current_speed_hu_s: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub min_streak: usize,
+    pub min_air_ticks: usize,
+    pub max_ground_ticks_bhop: usize,
+    pub min_speed: f32,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct BunnyHop {
     player_states: HashMap<SteamID, PlayerBhopState>,
     jg: JankGuard,
@@ -38,26 +48,20 @@ pub struct BunnyHop {
     detections: Vec<Detection>,
 }
 
-impl Default for BunnyHop {
+impl Default for Parameters {
     fn default() -> Self {
-        Self::new()
+        Self {
+            min_streak: 5,
+            min_air_ticks: 6,
+            max_ground_ticks_bhop: 1,
+            min_speed: 150.0,
+        }
     }
 }
 
 impl BunnyHop {
     pub fn new() -> Self {
-        Self {
-            player_states: HashMap::new(),
-            jg: JankGuard::default(),
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                ("min_streak".to_string(), Parameter::Int(5)),
-                ("min_air_ticks".to_string(), Parameter::Int(6)),
-                ("max_ground_ticks_bhop".to_string(), Parameter::Int(1)),
-                ("min_speed".to_string(), Parameter::Float(150.0)),
-            ]),
-            detections: Vec::new(),
-        }
+        Self::default()
     }
 }
 
@@ -70,8 +74,9 @@ impl CheatAlgorithm for BunnyHop {
         "fidoo/bunnyhop"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [min_streak, min_air_ticks, max_ground_ticks_bhop, min_speed]);
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
@@ -94,10 +99,10 @@ impl CheatAlgorithm for BunnyHop {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
-        let min_streak: i32 = get_parameter_value(&self.params, "min_streak").context("\"min_streak\" must be a valid value")?;
-        let min_air_ticks: i32 = get_parameter_value(&self.params, "min_air_ticks").context("\"min_air_ticks\" must be a valid value")?;
-        let max_ground_ticks: i32 = get_parameter_value(&self.params, "max_ground_ticks_bhop").context("\"max_ground_ticks_bhop\" must be a valid value")?;
-        let min_speed: f32 = get_parameter_value(&self.params, "min_speed").context("\"min_speed\" must be a valid value")?;
+        let min_streak = self.params.min_streak;
+        let min_air_ticks = self.params.min_air_ticks;
+        let max_ground_ticks = self.params.max_ground_ticks_bhop;
+        let min_speed = self.params.min_speed;
 
         let mut tick_detections = Vec::new();
         let algo_name = self.algorithm_name().to_string();
@@ -241,7 +246,7 @@ impl CheatAlgorithm for BunnyHop {
 
                     if air_at_landing >= min_air_ticks as u32 && current_speed >= min_speed {
                         // Strictly enforce that this hop does not exceed max_ground_ticks
-                        if (hopped_ground_ticks as i32) <= max_ground_ticks {
+                        if hopped_ground_ticks as usize <= max_ground_ticks {
                             pstate.current_streak += 1;
                             pstate.hop_ground_ticks.push(hopped_ground_ticks);
                             pstate.hop_speeds.push(current_speed);

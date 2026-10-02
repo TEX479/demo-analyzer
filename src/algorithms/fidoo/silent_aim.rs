@@ -4,16 +4,17 @@ The fact that you added unit tests for your algorithm is huge.
 I found a bug in my own "cleaner" code because of that. Thank you very much.
 Because of the tests I also went ahead and added a bunch more just in case.
 */
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::valid_players;
 use crate::util::helpers::{KeyValueVec, Vec3, ViewAngle};
 use crate::util::nocrex::jankguard::JankGuard;
@@ -56,23 +57,40 @@ pub struct SilentAim {
     params: Parameters,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub tick_window: usize,
+    pub max_delta_first_third: f32,
+    pub min_delta_second_third: f32,
+    pub min_ratio: f32,
+    pub exact_match_epsilon: f32,
+    pub suspicion_threshold: u32,
+    pub min_pvs_ticks: usize,
+    pub require_fire: bool,
+    pub fire_sync_ticks: usize,
+    pub clean_ticks_to_reset: usize,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            tick_window: 4,
+            max_delta_first_third: 2.2,
+            min_delta_second_third: 8.0,
+            min_ratio: 4.8,
+            exact_match_epsilon: 0.0001,
+            suspicion_threshold: 2,
+            min_pvs_ticks: 3,
+            require_fire: true,
+            fire_sync_ticks: 5,
+            clean_ticks_to_reset: 2000,
+        }
+    }
+}
+
 impl SilentAim {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("tick_window".to_string(), Parameter::Int(4)),
-                ("max_delta_first_third".to_string(), Parameter::Float(2.2)),
-                ("min_delta_second_third".to_string(), Parameter::Float(8.0)),
-                ("min_ratio".to_string(), Parameter::Float(4.8)),
-                ("exact_match_epsilon".to_string(), Parameter::Float(0.0001)),
-                ("suspicion_threshold".to_string(), Parameter::Int(2)),
-                ("min_pvs_ticks".to_string(), Parameter::Int(3)),
-                ("require_fire".to_string(), Parameter::Bool(true)),
-                ("fire_sync_ticks".to_string(), Parameter::Int(5)),
-                ("clean_ticks_to_reset".to_string(), Parameter::Int(2000)),
-            ]),
-            ..Default::default()
-        }
+        Self::default()
     }
 
     /// Classifies weapons into Hitscan, Melee, Sapper, Projectile, or Excluded.
@@ -293,8 +311,21 @@ impl CheatAlgorithm for SilentAim {
         "fidoo/silent_aim"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(
+            self.params; [
+            tick_window,
+                max_delta_first_third,
+                min_delta_second_third,
+                min_ratio,
+                exact_match_epsilon,
+                suspicion_threshold,
+                min_pvs_ticks,
+                fire_sync_ticks,
+                clean_ticks_to_reset,
+            ]
+        );
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
@@ -326,28 +357,16 @@ impl CheatAlgorithm for SilentAim {
         let ticknum = u32::from(state.tick);
         let algo_name = self.algorithm_name().to_string();
 
-        let tick_window = get_parameter_value::<i32>(&self.params, "tick_window")
-            .context("\"tick_window\" has to be a valid value")?
-            .max(2) as usize;
-        let max_delta_first_third =
-            get_parameter_value::<f32>(&self.params, "max_delta_first_third").context("\"max_delta_first_third\" has to be a valid value")?;
-        let min_delta_second_third =
-            get_parameter_value::<f32>(&self.params, "min_delta_second_third").context("\"min_delta_second_third\" has to be a valid value")?;
-        let min_ratio = get_parameter_value::<f32>(&self.params, "min_ratio").context("\"min_ratio\" has to be a valid value")?;
-        let exact_match_epsilon = get_parameter_value::<f32>(&self.params, "exact_match_epsilon").context("\"exact_match_epsilon\" has to be a valid value")?;
-        let suspicion_threshold = get_parameter_value::<i32>(&self.params, "suspicion_threshold")
-            .context("\"suspicion_threshold\" has to be a valid value")?
-            .max(1) as u32;
-        let min_pvs_ticks = get_parameter_value::<i32>(&self.params, "min_pvs_ticks")
-            .context("\"min_pvs_ticks\" has to be a valid value")?
-            .max(1) as u32;
-        let require_fire = get_parameter_value::<bool>(&self.params, "require_fire").context("\"require_fire\" has to be a valid value")?;
-        let fire_sync_ticks = get_parameter_value::<i32>(&self.params, "fire_sync_ticks")
-            .context("\"fire_sync_ticks\" has to be a valid value")?
-            .max(1) as u32;
-        let clean_ticks_to_reset = get_parameter_value::<i32>(&self.params, "clean_ticks_to_reset")
-            .context("\"clean_ticks_to_reset\" has to be a valid value")?
-            .max(1) as u32;
+        let tick_window = self.params.tick_window.max(2);
+        let max_delta_first_third = self.params.max_delta_first_third;
+        let min_delta_second_third = self.params.min_delta_second_third;
+        let min_ratio = self.params.min_ratio;
+        let exact_match_epsilon = self.params.exact_match_epsilon;
+        let suspicion_threshold = self.params.suspicion_threshold.max(1);
+        let min_pvs_ticks = self.params.min_pvs_ticks.max(1) as u32;
+        let require_fire = self.params.require_fire;
+        let fire_sync_ticks = self.params.fire_sync_ticks.max(1) as u32;
+        let clean_ticks_to_reset = self.params.clean_ticks_to_reset.max(1) as u32;
 
         let mut tick_detections = Vec::new();
         let mut players_to_remove = self.player_states.keys().to_vec();
@@ -638,7 +657,7 @@ mod tests {
     #[test]
     fn test_exact_match_instant_flag() {
         let mut algo = SilentAim::new();
-        algo.params.insert("require_fire".to_string(), Parameter::Bool(false));
+        algo.params.require_fire = false;
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
@@ -674,8 +693,8 @@ mod tests {
     #[test]
     fn test_drift_requires_suspicion_threshold() {
         let mut algo = SilentAim::new();
-        algo.params.insert("require_fire".to_string(), Parameter::Bool(false));
-        algo.params.insert("suspicion_threshold".to_string(), Parameter::Int(2));
+        algo.params.require_fire = false;
+        algo.params.suspicion_threshold = 2;
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
@@ -729,7 +748,7 @@ mod tests {
     #[test]
     fn test_high_pitch_scout_aim_not_filtered() {
         let mut algo = SilentAim::new();
-        algo.params.insert("require_fire".to_string(), Parameter::Bool(false));
+        algo.params.require_fire = false;
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 

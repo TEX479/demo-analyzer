@@ -1,11 +1,11 @@
 // Written by Teltta
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::player_with_sid;
 use anyhow::Error;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 use tf_demo_parser::ParserState;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::Message;
@@ -18,12 +18,23 @@ pub struct BackTrack {
 
 impl BackTrack {
     pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub distance: f32,
+    pub max_distance: f32,
+    pub max_angle_diff: f32,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
         Self {
-            params: HashMap::from([
-                ("distance".to_string(), Parameter::Float(200.0)),
-                ("max_distance".to_string(), Parameter::Float(600.0)),
-                ("max_angle_diff".to_string(), Parameter::Float(110.0)),
-            ]),
+            distance: 200.0,
+            max_distance: 600.0,
+            max_angle_diff: 110.0,
         }
     }
 }
@@ -73,9 +84,9 @@ impl CheatAlgorithm for BackTrack {
             let weapon_id = hurt.weapon_id;
             let damage_amount = hurt.damage_amount;
 
-            let distance: f32 = get_parameter_value(&self.params, "distance")?;
-            let max_distance: f32 = get_parameter_value(&self.params, "max_distance")?;
-            let max_angle_diff: f32 = get_parameter_value(&self.params, "max_angle_diff")?;
+            let distance = self.params.distance;
+            let max_distance = self.params.max_distance;
+            let max_angle_diff = self.params.max_angle_diff;
 
             // get steam id64 from uids
             let Some(attacker_sid) = state.get_steamid_from_userid(attacker_uid) else {
@@ -170,7 +181,8 @@ impl CheatAlgorithm for BackTrack {
         Ok(vec![])
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(self.params; [distance, max_distance, max_angle_diff]);
+        Some(params)
     }
 }

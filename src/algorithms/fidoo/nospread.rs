@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::message::Message;
@@ -8,10 +8,12 @@ use tf_demo_parser::demo::message::packetentities::EntityId;
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 use tf_demo_parser::{MessageType, ParserState};
 
-use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
+use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::geometry::viewangle_delta;
+use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::helpers::{ViewAngle, handle_to_entid};
 use crate::util::nocrex::jankguard::JankGuard;
 
@@ -288,6 +290,16 @@ struct FireEvent {
     pub weapon_id: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub min_shots_evaluated: usize,
+    pub min_seed_correlation: f32,
+    pub min_variance_ratio: f32,
+    pub max_tracking_variance: f32,
+    pub spread_tolerance_margin: f32,
+    pub min_detections: usize,
+}
+
 #[derive(Default)]
 pub struct NoSpread {
     params: Parameters,
@@ -297,6 +309,19 @@ pub struct NoSpread {
     player_trackers: HashMap<SteamID, PlayerTracker>,
     fire_events: HashMap<SteamID, Vec<FireEvent>>,
     detections: Vec<Detection>,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            min_shots_evaluated: 8,
+            min_seed_correlation: -0.85,
+            min_variance_ratio: 4.5,
+            max_tracking_variance: 0.5,
+            spread_tolerance_margin: 0.5,
+            min_detections: 3,
+        }
+    }
 }
 
 impl PlayerTracker {
@@ -384,23 +409,7 @@ impl PlayerTracker {
 
 impl NoSpread {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                ("min_shots_evaluated".to_string(), Parameter::Int(8)),
-                ("min_seed_correlation".to_string(), Parameter::Float(-0.85)),
-                ("min_variance_ratio".to_string(), Parameter::Float(4.5)),
-                ("max_tracking_variance".to_string(), Parameter::Float(0.50)),
-                ("spread_tolerance_margin".to_string(), Parameter::Float(0.50)),
-                ("min_detections".to_string(), Parameter::Int(3)),
-            ]),
-            jg: JankGuard::default(),
-            prev_players: HashMap::new(),
-            player_tick_deltas: HashMap::new(),
-            player_trackers: HashMap::new(),
-            fire_events: HashMap::new(),
-            detections: Vec::new(),
-        }
+        Self::default()
     }
 }
 
@@ -413,8 +422,18 @@ impl CheatAlgorithm for NoSpread {
         "fidoo/nospread"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(
+            self.params; [
+                min_shots_evaluated,
+                min_seed_correlation,
+                min_variance_ratio,
+                max_tracking_variance,
+                spread_tolerance_margin,
+                min_detections
+            ]
+        );
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
@@ -493,25 +512,13 @@ impl CheatAlgorithm for NoSpread {
         self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
 
-        let min_shots_evaluated: i32 = get_parameter_value(&self.params, "min_shots_evaluated").context("\"min_shots_evaluated\" must be a valid value")?;
-        let min_seed_correlation: f32 = get_parameter_value(&self.params, "min_seed_correlation").context("\"min_seed_correlation\" must be a valid value")?;
-        let spread_tolerance_margin: f32 =
-            get_parameter_value(&self.params, "spread_tolerance_margin").context("\"spread_tolerance_margin\" must be a valid value")?;
+        let min_shots_evaluated = self.params.min_shots_evaluated;
+        let min_seed_correlation = self.params.min_seed_correlation;
+        let spread_tolerance_margin = self.params.spread_tolerance_margin;
 
-        let min_shots = (min_shots_evaluated.max(4)) as usize;
+        let min_shots = min_shots_evaluated.max(4);
 
-        for player in state
-            .players
-            .iter()
-            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
-        {
-            let info = match &player.info {
-                Some(info) => info,
-                None => continue,
-            };
-
-            let Ok(steam_id) = SteamID::from_steam3(&info.steam_id) else { continue };
-
+        for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
@@ -634,7 +641,7 @@ impl CheatAlgorithm for NoSpread {
     }
 
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
-        let min_detections: i32 = get_parameter_value(&self.params, "min_detections").context("\"min_detections\" must be a valid value")?;
+        let min_detections = self.params.min_detections;
         if min_detections <= 1 {
             return Ok(self.detections.clone());
         }
@@ -647,7 +654,7 @@ impl CheatAlgorithm for NoSpread {
         let filtered: Vec<Detection> = self
             .detections
             .iter()
-            .filter(|det| counts.get(&det.player).is_some_and(|&c| c >= min_detections as usize))
+            .filter(|det| counts.get(&det.player).is_some_and(|&c| c >= min_detections))
             .cloned()
             .collect();
 
@@ -711,9 +718,7 @@ mod tests {
         let sid1 = SteamID::from(11111u64);
 
         let mut algo = NoSpread::new();
-        if let Some(params) = algo.params() {
-            params.insert("min_detections".to_string(), Parameter::Int(1));
-        }
+        algo.params.min_detections = 1;
 
         algo.detections.push(Detection {
             tick: 100,

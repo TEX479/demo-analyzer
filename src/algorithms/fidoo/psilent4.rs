@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::message::Message;
@@ -12,7 +12,8 @@ use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::geometry::viewangle_delta;
 use crate::util::helpers::{ViewAngle, handle_to_entid};
 
@@ -85,6 +86,16 @@ struct TentativeDetection {
     serial: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub angle_threshold: f32,
+    pub lookaround_ticks: usize,
+    pub max_owner_distance: f32,
+    pub minimum_samples: usize,
+    pub minimum_suspicious_launches: usize,
+}
+
+#[derive(Default)]
 pub struct Psilent4 {
     histories: HashMap<SteamID, VecDeque<PlayerSnapshot>>,
     pending: Vec<LaunchCandidate>,
@@ -93,22 +104,21 @@ pub struct Psilent4 {
     params: Parameters,
 }
 
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            angle_threshold: 12.0,
+            lookaround_ticks: 4,
+            max_owner_distance: 105.0,
+            minimum_samples: 2,
+            minimum_suspicious_launches: 2,
+        }
+    }
+}
+
 impl Psilent4 {
     pub fn new() -> Self {
-        Self {
-            histories: HashMap::new(),
-            pending: Vec::new(),
-            tentative: Vec::new(),
-            observations: HashMap::new(),
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                ("angle_threshold".to_string(), Parameter::Float(12.0)),
-                ("lookaround_ticks".to_string(), Parameter::Int(4)),
-                ("max_owner_distance".to_string(), Parameter::Float(105.0)),
-                ("minimum_samples".to_string(), Parameter::Int(2)),
-                ("minimum_suspicious_launches".to_string(), Parameter::Int(2)),
-            ]),
-        }
+        Self::default()
     }
 
     fn record_state(&mut self, state: &CheatAnalyserState) {
@@ -142,9 +152,7 @@ impl Psilent4 {
     }
 
     fn resolve_pending(&mut self, current_tick: u32, flush: bool) -> anyhow::Result<Vec<TentativeDetection>> {
-        let lookaround_ticks = get_parameter_value::<i32>(&self.params, "lookaround_ticks")
-            .context("\"lookaround_ticks\" should have a valid value")?
-            .max(0) as u32;
+        let lookaround_ticks = self.params.lookaround_ticks as u32;
         let mut waiting = Vec::new();
         let mut detections = Vec::new();
 
@@ -174,12 +182,6 @@ impl Psilent4 {
     }
 }
 
-impl Default for Psilent4 {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CheatAlgorithm for Psilent4 {
     fn enabled_by_default(&self) -> bool {
         true
@@ -189,8 +191,11 @@ impl CheatAlgorithm for Psilent4 {
         "fidoo/psilent4"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params = make_algorithm_params!(
+            self.params; [angle_threshold, lookaround_ticks, max_owner_distance, minimum_samples, minimum_suspicious_launches]
+        );
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
@@ -216,7 +221,7 @@ impl CheatAlgorithm for Psilent4 {
         };
         self.record_state(state);
         let tick = u32::from(state.tick);
-        let max_owner_distance = get_parameter_value::<f32>(&self.params, "max_owner_distance").context("\"max_owner_distance\" must be a valid value")?;
+        let max_owner_distance = self.params.max_owner_distance;
 
         for entity in &message.entities {
             if entity.update_type != UpdateType::Enter {
@@ -362,9 +367,7 @@ impl CheatAlgorithm for Psilent4 {
             }
         }
 
-        let minimum_launches = get_parameter_value::<i32>(&self.params, "minimum_suspicious_launches")
-            .context("\"minimum_suspicious_launches\" should be a valid value")?
-            .max(1) as usize;
+        let minimum_launches = self.params.minimum_suspicious_launches.max(1);
         let mut launch_counts = HashMap::<SteamID, usize>::new();
         for (player, _, _) in unique.keys() {
             *launch_counts.entry(*player).or_default() += 1;
@@ -391,17 +394,9 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         return None;
     }
 
-    let angle_threshold = get_parameter_value::<f32>(params, "angle_threshold")
-        .context("\"angle_threshold\" has to be a valid value")
-        .ok()?;
-    let lookaround_ticks = get_parameter_value::<i32>(params, "lookaround_ticks")
-        .context("\"lookaround_ticks\" must be a valid value")
-        .ok()?
-        .max(0) as u32;
-    let minimum_samples = get_parameter_value::<i32>(params, "minimum_samples")
-        .context("\"minimum_samples\" must be a valid value")
-        .ok()?
-        .max(1) as usize;
+    let angle_threshold = params.angle_threshold;
+    let lookaround_ticks = params.lookaround_ticks as u32;
+    let minimum_samples = params.minimum_samples.max(1);
     let history = histories.get(&candidate.player)?;
     let ping_ticks = ((candidate.player_ping as f32 / 15.0).round() as u32).min(20);
     let effective_lookaround = (lookaround_ticks + ping_ticks).clamp(16, 32);

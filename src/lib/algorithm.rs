@@ -7,13 +7,12 @@ pub use crate::algorithms::{
     },
     nocrex::{aimsnap::AimSnap, angle_repeat::AngleRepeat, oob_pitch::OOBPitch},
     teltta::{angle_history::AngleHistory, backtrack::BackTrack, double_tap::DoubleTap},
-    tex::angle_acceleration::AngleAccelerationAnalyzer,
     viewangles_180degrees::ViewAngles180Degrees,
     viewangles_to_csv::ViewAnglesToCSV,
     write_to_file::WriteToFile,
 };
 
-use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::Parameters};
+use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::AlgorithmParameters};
 use anyhow::Error;
 use bitbuffer::BitRead;
 use serde::{Deserialize, Serialize};
@@ -44,7 +43,6 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
-        Box::new(AngleAccelerationAnalyzer::default()),
         Box::new(AutoBackstab::new()),
         Box::new(InvalidEquipRegion::new()),
         Box::new(NoSpread::new()),
@@ -87,7 +85,7 @@ pub trait CheatAlgorithm {
     fn algorithm_name(&self) -> &str;
 
     // TODO: find a way to impl mutable params without forcing the slow-ish parsing of params
-    fn params(&mut self) -> Option<&mut Parameters> {
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
         None
     }
 

@@ -1,4 +1,4 @@
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use tf_demo_parser::demo::data::DemoTick;
@@ -10,7 +10,8 @@ use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{Parameter, Parameters, get_parameter_value};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::schema_equip_regions::{CosmeticInfo, check_cosmetic_conflict, get_cosmetic_info, is_action_item, is_dummy_or_invalid, is_weapon_wearable};
 
@@ -35,6 +36,16 @@ struct PlayerGenerationState {
     reported_loadouts: HashSet<Vec<u16>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    pub min_persistence_ticks: usize,
+    pub check_cosmetic_limit: bool,
+    pub ignore_quickswitch: bool,
+    pub valve_servers_only: bool,
+    pub ignore_preset_swap: bool,
+}
+
+#[derive(Default)]
 pub struct InvalidEquipRegion {
     pub params: Parameters,
     wearables: HashMap<EntityId, WearableEntityState>,
@@ -43,27 +54,21 @@ pub struct InvalidEquipRegion {
     pub server_name: String,
 }
 
-impl Default for InvalidEquipRegion {
+impl Default for Parameters {
     fn default() -> Self {
-        Self::new()
+        Self {
+            min_persistence_ticks: 600,
+            check_cosmetic_limit: true,
+            ignore_quickswitch: true,
+            valve_servers_only: true,
+            ignore_preset_swap: true,
+        }
     }
 }
 
 impl InvalidEquipRegion {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("min_persistence_ticks".to_string(), Parameter::Int(600)),
-                ("check_cosmetic_limit".to_string(), Parameter::Bool(true)),
-                ("ignore_quickswitch".to_string(), Parameter::Bool(true)),
-                ("valve_servers_only".to_string(), Parameter::Bool(true)),
-                ("ignore_preset_swap".to_string(), Parameter::Bool(true)),
-            ]),
-            wearables: HashMap::new(),
-            players: HashMap::new(),
-            current_tick: 0,
-            server_name: String::new(),
-        }
+        Self::default()
     }
 
     fn advance_generation(&mut self, player_ent: EntityId, in_pvs_reset: bool) {
@@ -84,8 +89,10 @@ impl CheatAlgorithm for InvalidEquipRegion {
         "fidoo/invalid_equip_region"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        let params =
+            make_algorithm_params!(self.params; [min_persistence_ticks, check_cosmetic_limit, ignore_quickswitch, valve_servers_only, ignore_preset_swap]);
+        Some(params)
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
@@ -259,15 +266,11 @@ impl CheatAlgorithm for InvalidEquipRegion {
                 }
             }
             Message::NetTick(_) => {
-                let min_persistence_ticks = get_parameter_value::<i32>(&self.params, "min_persistence_ticks")?.max(1) as u32;
-                let check_cosmetic_limit =
-                    get_parameter_value::<bool>(&self.params, "check_cosmetic_limit").context("\"check_cosmetic_limit\" must be a valid value")?;
-                let ignore_quickswitch =
-                    get_parameter_value::<bool>(&self.params, "ignore_quickswitch").context("\"ignore_quickswitch\" must be a valid value")?;
-                let valve_servers_only =
-                    get_parameter_value::<bool>(&self.params, "valve_servers_only").context("\"valve_servers_only\" must be a valid value")?;
-                let ignore_preset_swap =
-                    get_parameter_value::<bool>(&self.params, "ignore_preset_swap").context("\"ignore_preset_swap\" must be a valid value")?;
+                let min_persistence_ticks = self.params.min_persistence_ticks.max(1);
+                let check_cosmetic_limit = self.params.check_cosmetic_limit;
+                let ignore_quickswitch = self.params.ignore_quickswitch;
+                let valve_servers_only = self.params.valve_servers_only;
+                let ignore_preset_swap = self.params.ignore_preset_swap;
                 let is_valve_server = self.server_name.contains("Valve Matchmaking Server");
 
                 if valve_servers_only && !is_valve_server {
@@ -349,9 +352,9 @@ impl CheatAlgorithm for InvalidEquipRegion {
                         }
 
                         let can_flag = if ignore_preset_swap && is_preset_swap_candidate {
-                            p_state.witnessed_in_pvs_reset && p_state.post_reset_conflict_ticks >= min_persistence_ticks
+                            p_state.witnessed_in_pvs_reset && p_state.post_reset_conflict_ticks as usize >= min_persistence_ticks
                         } else {
-                            p_state.conflict_ticks >= min_persistence_ticks
+                            p_state.conflict_ticks as usize >= min_persistence_ticks
                         };
 
                         if can_flag && !p_state.reported_loadouts.contains(&loadout_key) {
@@ -432,7 +435,7 @@ mod tests {
     fn test_valve_servers_only_filter_enabled_community() {
         let mut algo = InvalidEquipRegion::new();
         algo.server_name = "UGC.TF | Trade #11 | FREE ITEMS!".to_string();
-        algo.params.insert("valve_servers_only".to_string(), Parameter::Bool(true));
+        algo.params.valve_servers_only = true;
 
         let state = CheatAnalyserState::default();
         let pstate = ParserState::new(24, |_| false, false);
@@ -448,11 +451,16 @@ mod tests {
 
     #[test]
     fn test_valve_servers_only_filter_disabled_community() {
-        let mut algo = InvalidEquipRegion::new();
+        let mut algo = InvalidEquipRegion {
+            params: Parameters {
+                min_persistence_ticks: 1,
+                valve_servers_only: false,
+                ignore_preset_swap: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         algo.server_name = "UGC.TF | Trade #11 | FREE ITEMS!".to_string();
-        algo.params.insert("valve_servers_only".to_string(), Parameter::Bool(false));
-        algo.params.insert("min_persistence_ticks".to_string(), Parameter::Int(1));
-        algo.params.insert("ignore_preset_swap".to_string(), Parameter::Bool(false));
 
         let player_ent = EntityId::from(10u32);
         let mut state = CheatAnalyserState::default();
@@ -507,11 +515,16 @@ mod tests {
 
     #[test]
     fn test_valve_servers_only_valve_server() {
-        let mut algo = InvalidEquipRegion::new();
+        let mut algo = InvalidEquipRegion {
+            params: Parameters {
+                min_persistence_ticks: 1,
+                valve_servers_only: true,
+                ignore_preset_swap: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         algo.server_name = "Valve Matchmaking Server (Stockholm srcds2015-sto1 #69)".to_string();
-        algo.params.insert("valve_servers_only".to_string(), Parameter::Bool(true));
-        algo.params.insert("min_persistence_ticks".to_string(), Parameter::Int(1));
-        algo.params.insert("ignore_preset_swap".to_string(), Parameter::Bool(false));
 
         let player_ent = EntityId::from(10u32);
         let mut state = CheatAnalyserState::default();
@@ -568,7 +581,7 @@ mod tests {
     fn test_account_id_filtering() {
         let mut algo = InvalidEquipRegion::new();
         algo.server_name = "Valve Matchmaking Server (test)".to_string();
-        algo.params.insert("min_persistence_ticks".to_string(), Parameter::Int(1));
+        algo.params.min_persistence_ticks = 1;
 
         let player_ent = EntityId::from(13u32);
         let steam_id64 = 76561199232172054u64; // account_id = 1271906326
