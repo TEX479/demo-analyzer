@@ -124,7 +124,7 @@ impl CheatAlgorithm for CrouchSpeed {
     }
 
     fn on_tick(&mut self, state: &CheatAnalyserState, _parser_state: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
+        self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
 
         let min_speed = self.params.min_speed;

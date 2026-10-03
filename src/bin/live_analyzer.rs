@@ -1,5 +1,6 @@
 use analysis_template::{
-    PRINT_VOTES, SILENT,
+    SILENT,
+    algorithms::tex::info_logger::Logger,
     lib::{
         algorithm::{AimSnap, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, SilentAim, ViewAngles180Degrees},
         parameters::{Config, try_update_algorithm_params},
@@ -32,7 +33,6 @@ fn main() {
     // initialize the config and show changes
     _ = get_desired_algorithms();
 
-    PRINT_VOTES.store(true, std::sync::atomic::Ordering::Relaxed);
     SILENT.store(true, std::sync::atomic::Ordering::Relaxed);
     let result = live_analysis(demo_directory, get_desired_algorithms);
     match result {
@@ -68,6 +68,9 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
     // }
 
     let mut algos: Vec<Box<dyn CheatAlgorithm + Send>> = vec![
+        // logger for stuff like printing votes
+        Box::new(Logger::default()),
+        // actual algos:
         Box::new(ViewAngles180Degrees::default()),
         Box::new(OOBPitch::new()),
         Box::new(AimSnap::new()),

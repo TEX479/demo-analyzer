@@ -185,10 +185,11 @@ impl DemoFileManager {
         if !detections.is_empty() && crate::PRINT_DETECTIONS_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
             for detection in detections.iter() {
                 let player_string = match get_player_name(&demo_file.handler.analyser.state, detection.player) {
-                    Some(name) => format!("{} ({:?})", detection.player.steam3(), name),
+                    Some(name) => format!("{}/{} ({:?})", u64::from(detection.player), detection.player.steam3(), name),
                     None => {
-                        tracing::warn!("could not get name for player with id {}", detection.player.steam3());
-                        detection.player.steam3()
+                        let player_string = format!("{}/{}", u64::from(detection.player), detection.player.steam3());
+                        tracing::warn!("could not get name for player {}", player_string);
+                        player_string
                     }
                 };
                 tracing::warn!(

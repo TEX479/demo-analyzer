@@ -8,8 +8,7 @@ use analysis_template::{
     SILENT,
     base::cheat_analyser_base::CheatAnalyser,
     lib::algorithm::{
-        AimSnap, AngleHistory, AngleRepeat, AutoBackstab, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, NoSpread, OOBPitch, Psilent5, SilentAim,
-        ViewAngles180Degrees, analyse,
+        AimSnap, AutoBackstab, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, NoSpread, OOBPitch, Psilent5, SilentAim, ViewAngles180Degrees, analyse,
     },
 };
 use anyhow::Context;
@@ -47,14 +46,18 @@ fn main() {
     let start = Instant::now();
     let analysed = files
         .into_par_iter()
-        .map(|path| analyze_demo_at_path(&path).context(format!("while analysing {:?}", path)))
+        .map(|path| {
+            let analysis = analyze_demo_at_path(&path).context(format!("while analysing {:?}", path));
+            (path, analysis)
+        })
         .collect::<Vec<_>>();
     let elapsed = start.elapsed();
     tracing::info!("finished analysing {} files in {:.02}s", files_len, elapsed.as_secs_f64());
 
     SILENT.store(false, std::sync::atomic::Ordering::Relaxed);
 
-    for analyzer_result in analysed.into_iter() {
+    for (path, analyzer_result) in analysed.into_iter() {
+        tracing::info!("result for {:?}", path);
         match analyzer_result {
             Ok(a) => {
                 if !a.detections.is_empty() {
@@ -100,6 +103,7 @@ fn get_demos_in_dir(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
 }
 
 fn analyze_demo_at_path(path: &Path) -> anyhow::Result<CheatAnalyser> {
+    tracing::info!("analyzing {:?}", path);
     let file = std::fs::read(path)?;
     let demo = Demo::new(&file);
     analyse(&demo, desired_algorithms())

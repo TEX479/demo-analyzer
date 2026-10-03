@@ -11,6 +11,9 @@ pub mod algorithms {
     pub mod viewangles_180degrees;
     pub mod viewangles_to_csv;
     pub mod write_to_file;
+    pub mod tex {
+        pub mod info_logger;
+    }
     pub mod nocrex {
         pub mod aimsnap;
         pub mod angle_repeat;
@@ -24,12 +27,12 @@ pub mod algorithms {
     pub mod fidoo {
         pub mod auto_backstab;
         pub mod bunnyhop;
+        pub mod duckspeed;
         pub mod invalid_equip_region;
         pub mod nospread;
         pub mod psilent4;
         pub mod psilent5;
         pub mod silent_aim;
-        pub mod duckspeed;
     }
 }
 
@@ -50,7 +53,6 @@ pub mod lib {
 pub mod live_analyzer;
 
 pub static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static PRINT_VOTES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(feature = "live_analyzer")]
 pub static PRINT_DETECTIONS_LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
