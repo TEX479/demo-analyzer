@@ -52,6 +52,7 @@ impl PlayerSnapshot {
 }
 
 #[derive(Debug, Clone)]
+// TODO: check if `String`s are necessary
 struct LaunchCandidate {
     tick: u32,
     player: SteamID,
@@ -75,11 +76,12 @@ struct TentativeDetection {
     serial: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Psilent5 {
     histories: HashMap<SteamID, VecDeque<PlayerSnapshot>>,
     pending: Vec<LaunchCandidate>,
     tentative: Vec<TentativeDetection>,
+    /// HashMap<(EntityIndex, SerialNumber), FirstTick>
     observations: HashMap<(u32, u32), u32>,
     params: Parameters,
 }
@@ -128,16 +130,14 @@ impl Psilent5 {
 
     fn record_snapshot(&mut self, steam_id: SteamID, snapshot: PlayerSnapshot) {
         let history = self.histories.entry(steam_id).or_default();
-        if let Some(previous) = history.back() {
-            if previous.tick == snapshot.tick
+        if let Some(previous) = history.back() && previous.tick == snapshot.tick
                 && previous.simtime == snapshot.simtime
                 && (previous.angle.yaw - snapshot.angle.yaw).abs() < 0.001
                 && (previous.angle.pitch - snapshot.angle.pitch).abs() < 0.001
                 // TODO: consider using length_square()
                 && (previous.position - snapshot.position).length() < 0.01
-            {
-                return;
-            }
+        {
+            return;
         }
         history.push_back(snapshot);
     }
@@ -156,7 +156,7 @@ impl Psilent5 {
             }
 
             let ping_ticks = ((candidate.player_ping as f32 / 15.0).round() as u32).min(20);
-            let effective_lookaround = (lookaround_ticks + ping_ticks).max(18).min(32);
+            let effective_lookaround = (lookaround_ticks + ping_ticks).clamp(18, 32);
 
             if !flush && current_tick < candidate.tick.saturating_add(effective_lookaround) {
                 waiting.push(candidate);
@@ -172,18 +172,6 @@ impl Psilent5 {
     }
 }
 
-impl Default for Psilent5 {
-    fn default() -> Self {
-        Self {
-            histories: HashMap::new(),
-            pending: Vec::new(),
-            tentative: Vec::new(),
-            observations: HashMap::new(),
-            params: Parameters::default(),
-        }
-    }
-}
-
 impl CheatAlgorithm for Psilent5 {
     fn enabled_by_default(&self) -> bool {
         true
@@ -193,7 +181,7 @@ impl CheatAlgorithm for Psilent5 {
         "fidoo/psilent5"
     }
 
-    fn params(&mut self) -> Option<AlgorithmParameters> {
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
         let params = make_algorithm_params!(self.params; [
             angle_threshold,
             lookaround_ticks,
@@ -380,7 +368,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
     let minimum_samples = params.minimum_samples;
     let history = histories.get(&candidate.player)?;
     let ping_ticks = ((candidate.player_ping as f32 / 15.0).round() as u32).min(20);
-    let effective_lookaround = (lookaround_ticks + ping_ticks).max(18).min(32);
+    let effective_lookaround = (lookaround_ticks + ping_ticks).clamp(18, 32);
     let start_tick = candidate.tick.saturating_sub(effective_lookaround);
     let end_tick = candidate.tick.saturating_add(effective_lookaround);
 
@@ -651,23 +639,19 @@ fn resolve_owner_steam_id(props: &[tf_demo_parser::demo::sendprop::SendProp], st
     const THROWER: SendPropIdentifier = SendPropIdentifier::new("DT_BaseGrenade", "m_hThrower");
 
     // Priority 1: m_hThrower (pipes, stickies)
-    if let Some(prop) = props.iter().find(|p| p.identifier == THROWER) {
-        if let Ok(handle) = i64::try_from(&prop.value) {
-            let entid = handle_to_entid(handle as u32);
-            if let Some(steam_id) = steam_id_from_entid(entid, state) {
-                return Some(steam_id);
-            }
-        }
+    if let Some(prop) = props.iter().find(|p| p.identifier == THROWER)
+        && let Ok(handle) = i64::try_from(&prop.value)
+        && let Some(steam_id) = steam_id_from_entid(handle_to_entid(handle as u32), state)
+    {
+        return Some(steam_id);
     }
 
     // Priority 2: m_hOwnerEntity (rockets, flares, crossbow bolts, syringes, arrows, energy orbs)
-    if let Some(prop) = props.iter().find(|p| p.identifier == OWNER) {
-        if let Ok(handle) = i64::try_from(&prop.value) {
-            let entid = handle_to_entid(handle as u32);
-            if let Some(steam_id) = steam_id_from_entid(entid, state) {
-                return Some(steam_id);
-            }
-        }
+    if let Some(prop) = props.iter().find(|p| p.identifier == OWNER)
+        && let Ok(handle) = i64::try_from(&prop.value)
+        && let Some(steam_id) = steam_id_from_entid(handle_to_entid(handle as u32), state)
+    {
+        return Some(steam_id);
     }
 
     None
@@ -678,34 +662,34 @@ fn steam_id_from_entid(entid: EntityId, state: &CheatAnalyserState) -> Option<St
         return None;
     }
     // Check direct Player match in state.players
-    if let Some(player) = state.players.iter().find(|p| p.entity == entid) {
-        if let Some(sid) = player_id(player) {
-            return Some(sid);
-        }
+    if let Some(player) = state.players.iter().find(|p| p.entity == entid)
+        && let Some(sid) = player_id(player)
+    {
+        return Some(sid);
     }
     // Check entid_to_userid -> userid_to_id64 mapping
-    if let Some(user_id) = state.get_userid_from_entid(entid) {
-        if let Some(sid) = state.get_steamid_from_userid(user_id) {
-            return Some(sid);
-        }
+    if let Some(user_id) = state.get_userid_from_entid(entid)
+        && let Some(sid) = state.get_steamid_from_userid(user_id)
+    {
+        return Some(sid);
     }
     None
 }
 
 fn is_accepted_projectile(class: &str) -> bool {
-    match class {
+    matches!(
+        class,
         "CTFProjectile_Rocket"
-        | "CTFGrenadePipebombProjectile"
-        | "CTFProjectile_Flare"
-        | "CTFProjectile_BallOfFire"
-        | "CTFProjectile_HealingBolt"
-        | "CTFProjectile_Syringe"
-        | "CTFProjectile_Arrow"
-        | "CTFProjectile_EnergyBall"
-        | "CTFProjectile_EnergyRing"
-        | "CTFProjectile_MechanicalArmOrb" => true,
-        _ => false,
-    }
+            | "CTFGrenadePipebombProjectile"
+            | "CTFProjectile_Flare"
+            | "CTFProjectile_BallOfFire"
+            | "CTFProjectile_HealingBolt"
+            | "CTFProjectile_Syringe"
+            | "CTFProjectile_Arrow"
+            | "CTFProjectile_EnergyBall"
+            | "CTFProjectile_EnergyRing"
+            | "CTFProjectile_MechanicalArmOrb"
+    )
 }
 
 fn is_deflected_or_touched(props: &[tf_demo_parser::demo::sendprop::SendProp]) -> bool {
@@ -737,10 +721,10 @@ fn extract_initial_velocity(class: &str, props: &[tf_demo_parser::demo::sendprop
         props,
         &[("DT_TFBaseRocket", "m_vInitialVelocity"), ("DT_TFWeaponBaseGrenadeProj", "m_vInitialVelocity")],
     );
-    if let Some(v) = vel {
-        if v.length_square() > 1.0 {
-            return Some(v);
-        }
+    if let Some(v) = vel
+        && v.length_square() > 1.0
+    {
+        return Some(v);
     }
 
     // Fallback to m_angRotation if initial velocity is missing/zero

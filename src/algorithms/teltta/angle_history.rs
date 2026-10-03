@@ -1,4 +1,5 @@
 // Written by Teltta
+// PERF: check why this algorithm eats performance and if it can be improved, fix that
 use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{

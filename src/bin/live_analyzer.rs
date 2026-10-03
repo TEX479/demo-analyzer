@@ -1,7 +1,7 @@
 use analysis_template::{
     PRINT_VOTES, SILENT,
     lib::{
-        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, SilentAim, ViewAngles180Degrees},
+        algorithm::{AimSnap, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, SilentAim, ViewAngles180Degrees},
         parameters::{Config, try_update_algorithm_params},
     },
     live_analyzer::live_analysis,
@@ -70,14 +70,20 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
     let mut algos: Vec<Box<dyn CheatAlgorithm + Send>> = vec![
         Box::new(ViewAngles180Degrees::default()),
         Box::new(OOBPitch::new()),
-        Box::new(AngleRepeat::new()),
-        Box::new(AngleHistory::default()),
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
         Box::new(SilentAim::new()),
         // Box::new(AngleAccelerationAnalyzer::default()),
         Box::new(BunnyHop::new()),
+        // TODO: look over, refactor and add:
+        // crouchspeed/duckspeed
+        // nospread
+        // psilent5
+        // invalid_equip_region
+        // PERF: disabled due to performance issues:
+        // Box::new(AngleRepeat::new()),
+        // Box::new(AngleHistory::default()),
     ];
     config_algorithms_desired(&mut algos);
     algos

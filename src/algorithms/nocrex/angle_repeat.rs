@@ -1,5 +1,6 @@
 // Written by Nocrex, Patched for Command Batching by Ciam
 
+// PERF: check why this algorithm eats performance and if it can be improved, fix that
 use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{

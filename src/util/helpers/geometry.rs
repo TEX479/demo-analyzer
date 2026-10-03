@@ -143,8 +143,22 @@ impl ViewAngle {
         let vec1 = self.to_unit_vec();
         let vec2 = other.to_unit_vec();
 
-        let dot = vec1.dot(vec2);
+        let dot = vec1.dot(vec2).clamp(-1.0, 1.0);
         dot.acos().to_degrees()
+    }
+
+    /// checks if a field is a NaN
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::ViewAngle;
+    /// assert!(!ViewAngle { yaw: 0.0, pitch: 0.0}.is_nan());
+    /// assert!(ViewAngle { yaw: f32::NAN, pitch: 0.0}.is_nan());
+    /// assert!(ViewAngle { yaw: 0.0, pitch: f32::NAN}.is_nan());
+    /// assert!(ViewAngle { yaw: f32::NAN, pitch: f32::NAN}.is_nan());
+    /// ```
+    pub fn is_nan(&self) -> bool {
+        self.yaw.is_nan() || self.pitch.is_nan()
     }
 }
 
@@ -308,6 +322,24 @@ impl Vec3 {
             y: self.y * multiplier,
             z: self.z * multiplier,
         }
+    }
+
+    /// checks if a field of self is NaN
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::Vec3;
+    /// assert!(!Vec3 { x: 0.0, y: 0.0, z: 0.0 }.is_nan());
+    /// assert!(Vec3 { x: f32::NAN, y: 0.0, z: 0.0 }.is_nan());
+    /// assert!(Vec3 { x: 0.0, y: f32::NAN, z: 0.0 }.is_nan());
+    /// assert!(Vec3 { x: f32::NAN, y: f32::NAN, z: 0.0 }.is_nan());
+    /// assert!(Vec3 { x: 0.0, y: 0.0, z: f32::NAN }.is_nan());
+    /// assert!(Vec3 { x: f32::NAN, y: 0.0, z: f32::NAN }.is_nan());
+    /// assert!(Vec3 { x: 0.0, y: f32::NAN, z: f32::NAN }.is_nan());
+    /// assert!(Vec3 { x: f32::NAN, y: f32::NAN, z: f32::NAN }.is_nan());
+    /// ```
+    pub fn is_nan(&self) -> bool {
+        self.x.is_nan() || self.y.is_nan() || self.z.is_nan()
     }
 }
 

@@ -101,7 +101,7 @@ impl CheatAlgorithm for CrouchSpeed {
         Self::ALGORITHM_NAME
     }
 
-    fn params(&mut self) -> Option<AlgorithmParameters> {
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
         let params = make_algorithm_params!(self.params; [
             min_speed, speed_ratio, min_consecutive_ticks, max_vertical_speed, debounce_ticks
         ]);
