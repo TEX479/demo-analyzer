@@ -12,7 +12,7 @@ pub use crate::algorithms::{
     write_to_file::WriteToFile,
 };
 
-use crate::{base::cheat_analyser_base::CheatAnalyserState, lib::parameters::AlgorithmParameters};
+use crate::{algorithms::tex::info_logger::Logger, base::cheat_analyser_base::CheatAnalyserState, lib::parameters::AlgorithmParameters};
 use anyhow::Error;
 use bitbuffer::BitRead;
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,8 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(SilentAim::new()),
         Box::new(CrouchSpeed::new()),
         Box::new(BunnyHop::new()),
+        // tex' algorithms
+        Box::new(Logger::default()),
     ]
 }
 

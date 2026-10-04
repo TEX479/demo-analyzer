@@ -29,6 +29,10 @@ impl Default for Parameters {
 }
 
 impl CheatAlgorithm for Logger {
+    fn does_handle(&self, message_type: tf_demo_parser::MessageType) -> bool {
+        matches!(message_type, tf_demo_parser::MessageType::GameEvent)
+    }
+
     fn enabled_by_default(&self) -> bool {
         true
     }
@@ -133,6 +137,10 @@ impl Logger {
     ///
     /// returns true if the user's class was not known or different
     fn update_class(&mut self, steam_id: SteamID, class: Class) -> bool {
-        !matches!(self.classes.insert(steam_id, class), Some(c) if c == class)
+        let is_same_class = match self.classes.insert(steam_id, class) {
+            Some(class_old) => class_old == class,
+            None => false,
+        };
+        !is_same_class
     }
 }
