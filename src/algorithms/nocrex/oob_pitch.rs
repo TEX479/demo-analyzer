@@ -82,7 +82,7 @@ impl CheatAlgorithm for OOBPitch {
             let is_valve_server = self.server_name.starts_with("Valve Matchmaking Server");
 
             for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
-                if !(min_pitch..=max_pitch).contains(&player.pitch_angle) {
+                if !(min_pitch..=max_pitch).contains(&player.view_angle.pitch) {
                     detections.push(steam_id);
                     if !self.last_detections.contains(&steam_id) {
                         submitted_detections.push(Detection {
@@ -90,7 +90,7 @@ impl CheatAlgorithm for OOBPitch {
                             algorithm: self.algorithm_name().to_string(),
                             player: steam_id,
                             data: json!({
-                                "pitch": player.pitch_angle,
+                                "pitch": player.view_angle.pitch,
                                 "valve_server": is_valve_server
                             }),
                         });

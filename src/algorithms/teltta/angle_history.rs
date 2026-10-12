@@ -81,9 +81,9 @@ impl CheatAlgorithm for AngleHistory {
                 .ticks
                 .get_mut(0)
                 .expect("the first tick was inserted earlier this function and must exist")
-                .insert(steam_id, ViewAngle::from(player));
+                .insert(steam_id, player.view_angle);
 
-            let current_angle = ViewAngle::from(player);
+            let current_angle = player.view_angle;
 
             let Some((match_index, delta_one)) = self
                 .ticks

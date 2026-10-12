@@ -28,12 +28,13 @@ pub use tf_demo_parser::demo::parser::analyser::{Class, Team, UserId};
 // use tf_demo_parser::demo::parser::analyser::Spawn;
 use tf_demo_parser::demo::parser::handler::BorrowMessageHandler;
 use tf_demo_parser::demo::sendprop::{SendProp, SendPropIdentifier, SendPropValue};
-use tf_demo_parser::demo::vector::{Vector, VectorXY};
+use tf_demo_parser::demo::vector::VectorXY;
 use tf_demo_parser::{MessageType, ParserState, ReadResult, Stream};
 use web_time::Instant;
 
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
+use crate::util::helpers::{Vec3, ViewAngle};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum PlayerState {
@@ -58,14 +59,12 @@ impl PlayerState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Player {
     pub entity: EntityId,
-    // TODO: replace using own `Vec3` struct
-    pub position: Vector,
+    pub position: Vec3,
     pub health: u16,
     pub max_health: u16,
     pub class: Class,
     pub team: Team,
-    pub view_angle: f32,
-    pub pitch_angle: f32,
+    pub view_angle: ViewAngle,
     pub state: PlayerState,
     pub info: Option<UserInfo>,
     pub charge: u8,
@@ -175,7 +174,7 @@ impl Player {
 pub struct Sentry {
     pub entity: EntityId,
     pub builder: UserId,
-    pub position: Vector,
+    pub position: Vec3,
     pub level: u8,
     pub max_health: u16,
     pub health: u16,
@@ -194,7 +193,7 @@ pub struct Sentry {
 pub struct Dispenser {
     pub entity: EntityId,
     pub builder: UserId,
-    pub position: Vector,
+    pub position: Vec3,
     pub level: u8,
     pub max_health: u16,
     pub health: u16,
@@ -210,7 +209,7 @@ pub struct Dispenser {
 pub struct Teleporter {
     pub entity: EntityId,
     pub builder: UserId,
-    pub position: Vector,
+    pub position: Vec3,
     pub level: u8,
     pub max_health: u16,
     pub health: u16,
@@ -265,7 +264,7 @@ impl Building {
         }
     }
 
-    pub fn position(&self) -> Vector {
+    pub fn position(&self) -> Vec3 {
         match self {
             Building::Sentry(Sentry { position, .. }) | Building::Dispenser(Dispenser { position, .. }) | Building::Teleporter(Teleporter { position, .. }) => {
                 *position
@@ -334,8 +333,8 @@ pub enum BuildingClass {
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct World {
-    pub boundary_min: Vector,
-    pub boundary_max: Vector,
+    pub boundary_min: Vec3,
+    pub boundary_max: Vec3,
 }
 
 // #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -772,13 +771,6 @@ impl CheatAnalyser {
 
         self.last_progress_update_time = Instant::now();
         self.progress.push(tick);
-        // PERF:
-        // self.progress = self
-        //     .progress
-        //     .iter()
-        //     .skip(self.progress.len().saturating_sub(TPS_ROLLING_AVERAGE_WINDOW as usize))
-        //     .copied()
-        //     .collect();
         while self.progress.len() > TPS_ROLLING_AVERAGE_WINDOW as usize {
             self.progress.remove(0);
         }
@@ -973,8 +965,8 @@ impl CheatAnalyser {
                     player.position.y = pos_xy.y;
                 }
                 LOCAL_ORIGIN_Z | NON_LOCAL_ORIGIN_Z => player.position.z = f32::try_from(&prop.value).unwrap_or_default(),
-                LOCAL_EYE_ANGLES | NON_LOCAL_EYE_ANGLES => player.view_angle = f32::try_from(&prop.value).unwrap_or_default(),
-                LOCAL_PITCH_ANGLES | NON_LOCAL_PITCH_ANGLES => player.pitch_angle = f32::try_from(&prop.value).unwrap_or_default(),
+                LOCAL_EYE_ANGLES | NON_LOCAL_EYE_ANGLES => player.view_angle.yaw = f32::try_from(&prop.value).unwrap_or_default(),
+                LOCAL_PITCH_ANGLES | NON_LOCAL_PITCH_ANGLES => player.view_angle.pitch = f32::try_from(&prop.value).unwrap_or_default(),
                 SIMTIME_PROP => player.simtime = i64::try_from(&prop.value).unwrap_or_default() as u16,
                 _ => {}
             }
@@ -995,7 +987,10 @@ impl CheatAnalyser {
             entity.get_prop_by_name("DT_WORLD", "m_WorldMins", parser_state),
             entity.get_prop_by_name("DT_WORLD", "m_WorldMaxs", parser_state),
         ) {
-            self.state.world = Some(World { boundary_min, boundary_max })
+            self.state.world = Some(World {
+                boundary_min: boundary_min.into(),
+                boundary_max: boundary_max.into(),
+            })
         }
     }
 
@@ -1146,7 +1141,7 @@ impl CheatAnalyser {
             }) => {
                 for prop in entity.props(parser_state) {
                     match prop.identifier {
-                        LOCAL_ORIGIN => *position = Vector::try_from(&prop.value).unwrap_or_default(),
+                        LOCAL_ORIGIN => *position = Vec3::try_from(&prop.value).unwrap_or_default(),
                         TEAM => *team = Team::new(i64::try_from(&prop.value).unwrap_or_default()),
                         ANGLE => *angle = f32::try_from(&prop.value).unwrap_or_default(),
                         SAPPED => *sapped = i64::try_from(&prop.value).unwrap_or_default() > 0,

@@ -6,7 +6,7 @@ use std::io::Write;
 use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
-use crate::util::helpers::geometry::{ViewAngle, viewangle_delta};
+use crate::util::helpers::geometry::{ViewAngle, ViewAngleDelta};
 use crate::{dev_print, make_algorithm_params};
 use anyhow::{Context, Error};
 use tf_demo_parser::ParserState;
@@ -25,10 +25,8 @@ struct Record {
     origin_x: f32,
     origin_y: f32,
     origin_z: f32,
-    viewangle: f32,
-    pitchangle: f32,
-    va_delta: f32,
-    pa_delta: f32,
+    view_angle: ViewAngle,
+    va_delta: ViewAngleDelta,
 }
 
 impl Display for Record {
@@ -36,7 +34,16 @@ impl Display for Record {
         write!(
             f,
             "{},{},{},{},{},{},{},{},{},{}",
-            self.tick, self.name, self.steam_id, self.origin_x, self.origin_y, self.origin_z, self.viewangle, self.pitchangle, self.va_delta, self.pa_delta
+            self.tick,
+            self.name,
+            self.steam_id,
+            self.origin_x,
+            self.origin_y,
+            self.origin_z,
+            self.view_angle.yaw,
+            self.view_angle.pitch,
+            self.va_delta.yaw,
+            self.va_delta.pitch,
         )
     }
 }
@@ -120,8 +127,7 @@ impl CheatAlgorithm for ViewAnglesToCSV {
             let origin_x = player.position.x;
             let origin_y = player.position.y;
             let origin_z = player.position.z;
-            let viewangle = player.view_angle;
-            let pitchangle = player.pitch_angle;
+            let view_angle = player.view_angle;
             let steam_id = &info.steam_id;
 
             let tick_delta = {
@@ -132,20 +138,27 @@ impl CheatAlgorithm for ViewAnglesToCSV {
                 }
             };
 
-            let (va_delta, pa_delta) = self.previous.as_ref().map_or((f32::NAN, f32::NAN), |prev_state| {
-                match prev_state
+            let va_delta = self.previous.as_ref().map_or(
+                ViewAngleDelta {
+                    yaw: f32::NAN,
+                    pitch: f32::NAN,
+                },
+                |prev_state| match prev_state
                     .players
                     .iter()
                     .find(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|i| i.steam_id == *steam_id))
                 {
                     Some(prev_player) => {
-                        let current_angle = ViewAngle::from(player);
-                        let previous_angle = ViewAngle::from(prev_player);
-                        viewangle_delta(current_angle, previous_angle, tick_delta)
+                        let current_angle = player.view_angle;
+                        let previous_angle = prev_player.view_angle;
+                        previous_angle.viewangle_delta(current_angle) / tick_delta.max(1) as f32
                     }
-                    None => (f32::NAN, f32::NAN),
-                }
-            });
+                    None => ViewAngleDelta {
+                        yaw: f32::NAN,
+                        pitch: f32::NAN,
+                    },
+                },
+            );
 
             self.history.push(Record {
                 tick: ticknum,
@@ -154,10 +167,8 @@ impl CheatAlgorithm for ViewAnglesToCSV {
                 origin_x,
                 origin_y,
                 origin_z,
-                viewangle,
-                pitchangle,
+                view_angle,
                 va_delta,
-                pa_delta,
             });
         }
         self.previous = Some(state.clone());

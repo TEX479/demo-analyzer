@@ -415,8 +415,8 @@ impl CheatAlgorithm for SilentAim {
             let curr_snap = PlayerSnapshot {
                 tick: ticknum,
                 simtime: player.simtime,
-                position: player.position.into(),
-                angle: player.into(),
+                position: player.position,
+                angle: player.view_angle,
             };
 
             pstate.history.push_front(curr_snap);
@@ -622,16 +622,15 @@ mod tests {
         ParserState::new(24, |_| false, false)
     }
 
-    fn create_test_player(entity_id: u32, user_id: u32, steam_id: &str, pos: Vec3, yaw: f32, pitch: f32, in_pvs: bool) -> Player {
+    fn create_test_player(entity_id: u32, user_id: u32, steam_id: &str, position: Vec3, view_angle: ViewAngle, in_pvs: bool) -> Player {
         Player {
             entity: EntityId::from(entity_id),
-            position: pos.into(),
+            position,
             health: 125,
             max_health: 125,
             class: Class::Scout,
             team: Team::Red,
-            view_angle: yaw,
-            pitch_angle: pitch,
+            view_angle,
             state: PlayerState::Alive,
             info: Some(UserInfo {
                 classes: Default::default(),
@@ -651,6 +650,10 @@ mod tests {
             cond_ex2: 0,
             invis_change_complete_time: 0.0,
             flags: 1,
+
+            last_spawn: 0,
+            last_fire: 0,
+            last_teleport: 0,
         }
     }
 
@@ -669,18 +672,39 @@ mod tests {
         // Pre-fill PVS grace ticks at base angle (45.0, 0.0)
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
+            state.players = vec![create_test_player(
+                1,
+                1,
+                steam_id_str,
+                Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                ViewAngle { yaw: 45.0, pitch: 0.0 },
+                true,
+            )];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Tick 105: Flick to (75.0, 15.0) -> peak delta > 30°
         state.tick = 105.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            ViewAngle { yaw: 75.0, pitch: 15.0 },
+            true,
+        )];
         let _ = algo.on_tick(&state, &parser_state);
 
         // Tick 106: Snap back to EXACT SAME (45.0, 0.0)
         state.tick = 106.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            ViewAngle { yaw: 45.0, pitch: 0.0 },
+            true,
+        )];
         let detections = algo.on_tick(&state, &parser_state).unwrap();
 
         // Exact match should flag immediately on first flick!
@@ -706,18 +730,39 @@ mod tests {
         // Baseline
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.0, 0.0, true)];
+            state.players = vec![create_test_player(
+                1,
+                1,
+                steam_id_str,
+                Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                ViewAngle { yaw: 45.0, pitch: 0.0 },
+                true,
+            )];
             let detections = algo.on_tick(&state, &parser_state).unwrap();
             assert_eq!(detections.len(), 0);
         }
 
         // Flick 1: Peak to 75.0, then snapback to 45.5 (drift = 0.5°)
         state.tick = 105.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 75.0, 15.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            ViewAngle { yaw: 75.0, pitch: 15.0 },
+            true,
+        )];
         let _ = algo.on_tick(&state, &parser_state);
 
         state.tick = 106.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            ViewAngle { yaw: 45.5, pitch: 0.0 },
+            true,
+        )];
         let det1 = algo.on_tick(&state, &parser_state).unwrap();
         // 1st drift flick should NOT flag yet because suspicion_threshold = 2
         assert_eq!(det1.len(), 0);
@@ -725,19 +770,40 @@ mod tests {
         // Continue baseline
         for t in 107..110 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.5, 0.0, true)];
+            state.players = vec![create_test_player(
+                1,
+                1,
+                steam_id_str,
+                Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                ViewAngle { yaw: 45.5, pitch: 0.0 },
+                true,
+            )];
             let detections = algo.on_tick(&state, &parser_state).unwrap();
             assert_eq!(detections.len(), 0);
         }
 
         // Flick 2: Peak to 80.0, then snapback to 45.9 (drift = 0.4°)
         state.tick = 110.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 80.0, 20.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            ViewAngle { yaw: 80.0, pitch: 20.0 },
+            true,
+        )];
         let detections = algo.on_tick(&state, &parser_state).unwrap();
         assert_eq!(detections.len(), 0);
 
         state.tick = 111.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 45.9, 0.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            ViewAngle { yaw: 45.9, pitch: 0.0 },
+            true,
+        )];
         let det2 = algo.on_tick(&state, &parser_state).unwrap();
         // 2nd drift flick reaches threshold -> flags!
         assert_eq!(det2.len(), 1);
@@ -760,18 +826,39 @@ mod tests {
         // Pre-fill at steep downward pitch (58.0°) - Scout shooting downward from high ground
         for t in 100..105 {
             state.tick = t.into();
-            state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
+            state.players = vec![create_test_player(
+                1,
+                1,
+                steam_id_str,
+                Vec3 { x: 0.0, y: 0.0, z: 500.0 },
+                ViewAngle { yaw: 45.0, pitch: 58.0 },
+                true,
+            )];
             let _ = algo.on_tick(&state, &parser_state);
         }
 
         // Flick to (65.0, 60.0) -> peak delta ~ 20°
         state.tick = 105.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 500.0 }, 65.0, 60.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 500.0 },
+            ViewAngle { yaw: 65.0, pitch: 60.0 },
+            true,
+        )];
         let _ = algo.on_tick(&state, &parser_state);
 
         // Snapback to exact (45.0, 58.0)
         state.tick = 106.into();
-        state.players = vec![create_test_player(1, 1, steam_id_str, Vec3 { x: 0.0, y: 0.0, z: 500.0 }, 45.0, 58.0, true)];
+        state.players = vec![create_test_player(
+            1,
+            1,
+            steam_id_str,
+            Vec3 { x: 0.0, y: 0.0, z: 500.0 },
+            ViewAngle { yaw: 45.0, pitch: 58.0 },
+            true,
+        )];
         let detections = algo.on_tick(&state, &parser_state).unwrap();
 
         // Scout aiming downward from high ground MUST NOT be filtered!

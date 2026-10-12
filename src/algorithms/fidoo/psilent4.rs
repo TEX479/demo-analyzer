@@ -8,15 +8,13 @@ use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::message::packetentities::{EntityId, UpdateType};
 use tf_demo_parser::demo::parser::analyser::Class;
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
-use tf_demo_parser::demo::vector::Vector;
 use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
-use crate::util::helpers::geometry::viewangle_delta;
-use crate::util::helpers::{ViewAngle, handle_to_entid};
+use crate::util::helpers::{Vec3, ViewAngle, handle_to_entid};
 
 const HISTORY_TICKS: u32 = 36;
 const PIPE_VERTICAL_BOOST: f32 = 200.0;
@@ -31,9 +29,8 @@ const AIM_DISTANCES: [f32; 8] = [48.0, 64.0, 96.0, 128.0, 256.0, 512.0, 1024.0, 
 #[derive(Clone, Copy)]
 struct PlayerSnapshot {
     tick: u32,
-    position: Vector,
-    yaw: f32,
-    pitch: f32,
+    position: Vec3,
+    view_angle: ViewAngle,
     simtime: u16,
     _ping: u16,
     in_pvs: bool,
@@ -45,21 +42,11 @@ impl PlayerSnapshot {
         Self {
             tick,
             position: player.position,
-            yaw: player.view_angle,
-            pitch: player.pitch_angle,
+            view_angle: player.view_angle,
             simtime: player.simtime,
             _ping: player.ping,
             in_pvs: player.in_pvs,
             state: player.state,
-        }
-    }
-}
-
-impl From<&PlayerSnapshot> for ViewAngle {
-    fn from(value: &PlayerSnapshot) -> Self {
-        Self {
-            yaw: value.yaw,
-            pitch: value.pitch,
         }
     }
 }
@@ -74,9 +61,9 @@ struct LaunchCandidate {
     projectile: String,
     projectile_entity: u32,
     serial: u32,
-    origin: Vector,
-    initial_velocity: Vector,
-    launch_direction: Vector,
+    origin: Vec3,
+    initial_velocity: Vec3,
+    launch_direction: Vec3,
     owner_distance: f32,
     pipe_type: Option<i64>,
 }
@@ -143,9 +130,9 @@ impl Psilent4 {
         if let Some(previous) = history.back()
             && previous.tick == snapshot.tick
             && previous.simtime == snapshot.simtime
-            && (previous.yaw - snapshot.yaw).abs() < 0.001
-            && (previous.pitch - snapshot.pitch).abs() < 0.001
-            && vector_length(previous.position - snapshot.position) < 0.01
+            && (previous.view_angle.yaw - snapshot.view_angle.yaw).abs() < 0.001
+            && (previous.view_angle.pitch - snapshot.view_angle.pitch).abs() < 0.001
+            && (previous.position - snapshot.position).length() < 0.01
         {
             return;
         }
@@ -268,12 +255,9 @@ impl CheatAlgorithm for Psilent4 {
                 let ang_rotation = projectile_vector(&props, &[("DT_TFBaseRocket", "m_angRotation"), ("DT_BaseEntity", "m_angRotation")]);
                 if let Some(rot) = ang_rotation {
                     let speed = if class == "CTFProjectile_BallOfFire" { 3000.0 } else { 1100.0 };
-                    let dir = angles_to_vector(ViewAngle { yaw: rot.y, pitch: rot.x });
-                    Vector {
-                        x: dir.x * speed,
-                        y: dir.y * speed,
-                        z: dir.z * speed,
-                    }
+                    // TODO: check that yaw & pitch are not mixed up
+                    let dir = ViewAngle { yaw: rot.y, pitch: rot.x }.to_unit_vec();
+                    dir * speed
                 } else if let Some(vel) = projectile_vector(
                     &props,
                     &[("DT_TFBaseRocket", "m_vInitialVelocity"), ("DT_TFWeaponBaseGrenadeProj", "m_vInitialVelocity")],
@@ -299,19 +283,19 @@ impl CheatAlgorithm for Psilent4 {
             }
             let pipe_type = projectile_integer(&props, &[("DT_TFProjectile_Pipebomb", "m_iType")]);
             let velocity = if arcing_projectile(class) && pipe_type != Some(1) {
-                Vector {
+                Vec3 {
                     z: initial_velocity.z - PIPE_VERTICAL_BOOST,
                     ..initial_velocity
                 }
             } else {
                 initial_velocity
             };
-            let Some(launch_direction) = normalized(velocity) else {
+            let Some(launch_direction) = velocity.checked_normalized() else {
                 continue;
             };
 
             let offset = origin - player.position;
-            let owner_distance = vector_length(offset);
+            let owner_distance = offset.length();
             if !owner_distance.is_finite() || owner_distance > max_owner_distance {
                 continue;
             }
@@ -420,21 +404,21 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
     for window in samples.windows(2) {
         let (s1, s2) = (window[0], window[1]);
         let pos_delta = s2.position - s1.position;
-        let distance = vector_length(pos_delta);
+        let distance = pos_delta.length();
         if distance > TELEPORT_THRESHOLD {
             return None;
         }
     }
 
-    let launch_angles = vector_angles(candidate.launch_direction);
+    let launch_angles = ViewAngle::from(candidate.launch_direction);
     let mut raw_delta = f32::INFINITY;
     let mut compensated_delta = f32::INFINITY;
     let mut best_view = ViewAngle::default();
     let mut best_tick = candidate.tick;
 
-    let mut test_views: Vec<(u32, Vector, ViewAngle)> = Vec::new();
+    let mut test_views: Vec<(u32, Vec3, ViewAngle)> = Vec::new();
     for &sample in &samples {
-        test_views.push((sample.tick, sample.position, sample.into()));
+        test_views.push((sample.tick, sample.position, sample.view_angle));
     }
 
     for window in samples.windows(2) {
@@ -447,24 +431,14 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         let steps = if tick_gap == 0 { 4 } else { (tick_gap.min(8) * 2).max(4) };
         for step in 1..steps {
             let fraction = step as f32 / steps as f32;
-            let (va_diff, pa_diff) = viewangle_delta(s2.into(), s1.into(), 1);
-            let interp_yaw = (s1.yaw + va_diff * fraction).rem_euclid(360.0);
-            let interp_pitch = (s1.pitch + pa_diff * fraction).clamp(-89.0, 89.0);
-            let interp_pos = Vector {
-                x: s1.position.x + (s2.position.x - s1.position.x) * fraction,
-                y: s1.position.y + (s2.position.y - s1.position.y) * fraction,
-                z: s1.position.z + (s2.position.z - s1.position.z) * fraction,
-            };
+            let va_diff = s1.view_angle.viewangle_delta(s2.view_angle);
+            // TODO: check if pitch clamping is really necessary.
+            // if so, manually calculate `interp`. check commit 556b7c379c8e for how this was done
+            let interp_angle = s1.view_angle + va_diff * fraction;
+            let interp_pos = s1.position + (s2.position - s1.position) * fraction;
             let interp_tick_float = s1.tick as f32 + (s2.tick as f32 - s1.tick as f32) * fraction;
             let interp_tick = interp_tick_float.round() as u32;
-            test_views.push((
-                interp_tick,
-                interp_pos,
-                ViewAngle {
-                    yaw: interp_yaw,
-                    pitch: interp_pitch,
-                },
-            ));
+            test_views.push((interp_tick, interp_pos, interp_angle));
         }
     }
 
@@ -485,29 +459,29 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
             }
 
             if (view.pitch > 35.0 || is_downward_shot) && candidate.launch_direction.z < -0.01 {
-                let eye = Vector { z: pos.z + eye_height, ..pos };
+                let eye = Vec3 { z: pos.z + eye_height, ..pos };
                 let ground_z = pos.z;
                 let t_ground = (ground_z - candidate.origin.z) / candidate.launch_direction.z;
                 if t_ground > 0.0 && t_ground < 1000.0 {
-                    let impact = Vector {
+                    let impact = Vec3 {
                         x: candidate.origin.x + candidate.launch_direction.x * t_ground,
                         y: candidate.origin.y + candidate.launch_direction.y * t_ground,
                         z: ground_z,
                     };
-                    let v_view = angles_to_vector(view);
+                    let v_view = view.to_unit_vec();
                     if v_view.z < -0.01 {
                         let t_eye = (ground_z - eye.z) / v_view.z;
                         if t_eye > 0.0 {
-                            let eye_impact = Vector {
+                            let eye_impact = Vec3 {
                                 x: eye.x + v_view.x * t_eye,
                                 y: eye.y + v_view.y * t_eye,
                                 z: ground_z,
                             };
                             let diff = impact - eye_impact;
                             if diff.x * diff.x + diff.y * diff.y <= 2500.0
-                                && let Some(ground_dir) = normalized(impact - eye)
+                                && let Some(ground_dir) = (impact - eye).checked_normalized()
                             {
-                                let ground_angles = vector_angles(ground_dir);
+                                let ground_angles = ViewAngle::from(ground_dir);
                                 let delta = view.world_angle_delta(ground_angles);
                                 if delta < compensated_delta {
                                     compensated_delta = delta;
@@ -531,15 +505,11 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                     best_tick = tick;
                 }
 
-                let eye = Vector { z: pos.z + eye_height, ..pos };
-                let v_view = angles_to_vector(view);
-                let target = Vector {
-                    x: eye.x + v_view.x * aim_distance,
-                    y: eye.y + v_view.y * aim_distance,
-                    z: eye.z + v_view.z * aim_distance,
-                };
-                if let Some(dir) = normalized(target - candidate.origin) {
-                    let expected_angles = vector_angles(dir);
+                let eye = Vec3 { z: pos.z + eye_height, ..pos };
+                let v_view = view.to_unit_vec();
+                let target = eye + v_view * aim_distance;
+                if let Some(dir) = (target - candidate.origin).checked_normalized() {
+                    let expected_angles = ViewAngle::from(dir);
                     let delta = launch_angles.world_angle_delta(expected_angles);
                     if delta < compensated_delta {
                         compensated_delta = delta;
@@ -626,13 +596,13 @@ fn resolve_owner(props: &[tf_demo_parser::demo::sendprop::SendProp], state: &Che
         .find(|entity| state.get_userid_from_entid(*entity).is_some())
 }
 
-fn projectile_vector(props: &[tf_demo_parser::demo::sendprop::SendProp], identifiers: &[(&str, &str)]) -> Option<Vector> {
+fn projectile_vector(props: &[tf_demo_parser::demo::sendprop::SendProp], identifiers: &[(&str, &str)]) -> Option<Vec3> {
     identifiers.iter().find_map(|(table, name)| {
         let identifier = SendPropIdentifier::new(table, name);
         props
             .iter()
             .find(|prop| prop.identifier == identifier)
-            .and_then(|prop| Vector::try_from(&prop.value).ok())
+            .and_then(|prop| Vec3::try_from(&prop.value).ok())
     })
 }
 
@@ -651,20 +621,20 @@ fn player_id(player: &Player) -> Option<SteamID> {
     SteamID::from_steam3(&info.steam_id).ok()
 }
 
-fn optimal_muzzle_compensation(origin: Vector, direction: Vector, player_origin: Vector, eye_height: f32, view: ViewAngle) -> Option<ViewAngle> {
-    let eye = Vector {
+fn optimal_muzzle_compensation(origin: Vec3, direction: Vec3, player_origin: Vec3, eye_height: f32, view: ViewAngle) -> Option<ViewAngle> {
+    let eye = Vec3 {
         z: player_origin.z + eye_height,
         ..player_origin
     };
-    let v_view = angles_to_vector(view);
+    let v_view = view.to_unit_vec();
     let x = origin - eye;
-    let v_dot_d = dot(v_view, direction);
+    let v_dot_d = v_view.dot(direction);
     let denom = 1.0 - v_dot_d * v_dot_d;
     if denom.abs() < 1e-6 {
         return None;
     }
-    let v_dot_x = dot(v_view, x);
-    let x_dot_d = dot(x, direction);
+    let v_dot_x = v_view.dot(x);
+    let x_dot_d = x.dot(direction);
     let t = (v_dot_x * v_dot_d - x_dot_d) / denom;
     if t <= 0.0 || t > 4000.0 {
         return None;
@@ -673,33 +643,25 @@ fn optimal_muzzle_compensation(origin: Vector, direction: Vector, player_origin:
     if s <= 0.0 {
         return None;
     }
-    let p_proj = Vector {
-        x: origin.x + direction.x * t,
-        y: origin.y + direction.y * t,
-        z: origin.z + direction.z * t,
-    };
-    let p_eye = Vector {
-        x: eye.x + v_view.x * s,
-        y: eye.y + v_view.y * s,
-        z: eye.z + v_view.z * s,
-    };
+    let p_proj = origin + direction * t;
+    let p_eye = eye + v_view * s;
     let diff = p_proj - p_eye;
     let miss_dist_sq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
     if miss_dist_sq > 400.0 {
         return None;
     }
     let target = p_proj - eye;
-    normalized(target).map(vector_angles)
+    target.checked_normalized().map(ViewAngle::from)
 }
 
-fn compensate_muzzle_offset(origin: Vector, direction: Vector, player_origin: Vector, eye_height: f32, aim_distance: f32) -> Option<ViewAngle> {
-    let eye = Vector {
+fn compensate_muzzle_offset(origin: Vec3, direction: Vec3, player_origin: Vec3, eye_height: f32, aim_distance: f32) -> Option<ViewAngle> {
+    let eye = Vec3 {
         z: player_origin.z + eye_height,
         ..player_origin
     };
     let offset = origin - eye;
-    let along = dot(offset, direction);
-    let discriminant = along * along - (dot(offset, offset) - aim_distance * aim_distance);
+    let along = offset.dot(direction);
+    let discriminant = along * along - (offset.dot(offset) - aim_distance * aim_distance);
     if discriminant < 0.0 {
         return None;
     }
@@ -707,48 +669,6 @@ fn compensate_muzzle_offset(origin: Vector, direction: Vector, player_origin: Ve
     if travel <= 0.0 {
         return None;
     }
-    let target_direction = Vector {
-        x: origin.x + direction.x * travel - eye.x,
-        y: origin.y + direction.y * travel - eye.y,
-        z: origin.z + direction.z * travel - eye.z,
-    };
-    normalized(target_direction).map(vector_angles)
-}
-
-fn normalized(vector: Vector) -> Option<Vector> {
-    let length = vector_length(vector);
-    if !length.is_finite() || length < 100.0 * f32::EPSILON {
-        return None;
-    }
-    Some(Vector {
-        x: vector.x / length,
-        y: vector.y / length,
-        z: vector.z / length,
-    })
-}
-
-fn vector_angles(vector: Vector) -> ViewAngle {
-    let horizontal = (vector.x * vector.x + vector.y * vector.y).sqrt();
-    ViewAngle {
-        yaw: vector.y.atan2(vector.x).to_degrees(),
-        pitch: (-vector.z).atan2(horizontal).to_degrees(),
-    }
-}
-
-fn vector_length(vector: Vector) -> f32 {
-    dot(vector, vector).sqrt()
-}
-
-fn dot(first: Vector, second: Vector) -> f32 {
-    first.x * second.x + first.y * second.y + first.z * second.z
-}
-
-fn angles_to_vector(viewangle: ViewAngle) -> Vector {
-    let yaw_rad = viewangle.yaw.to_radians();
-    let pitch_rad = viewangle.pitch.to_radians();
-    Vector {
-        x: yaw_rad.cos() * pitch_rad.cos(),
-        y: yaw_rad.sin() * pitch_rad.cos(),
-        z: -pitch_rad.sin(),
-    }
+    let target_direction = origin + direction * travel - eye;
+    target_direction.checked_normalized().map(ViewAngle::from)
 }

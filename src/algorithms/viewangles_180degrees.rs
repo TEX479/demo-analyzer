@@ -3,7 +3,6 @@ use crate::{
     lib::algorithm::{CheatAlgorithm, Detection},
     util::helpers::{
         KeyValueVec, ViewAngle,
-        geometry::viewangle_delta,
         player_finders::{players_alive_and_in_pvs, valid_players},
     },
 };
@@ -59,24 +58,24 @@ impl CheatAlgorithm for ViewAngles180Degrees {
         // - Alive (you can't cheat if you're dead)
         // - Not a tf_bot (you can't convict a tf_bot)
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
-            let current_viewangle = ViewAngle::from(player);
+            let current_viewangle = player.view_angle;
             _ = new_player_history.insert(steam_id, current_viewangle);
 
             let Some(previous_viewangle) = self.previous_angles.get(&steam_id).copied() else {
                 continue;
             };
 
-            let (va_delta, pa_delta) = viewangle_delta(current_viewangle, previous_viewangle, tick_delta);
+            let va_delta = previous_viewangle.viewangle_delta(current_viewangle) / tick_delta.max(1) as f32;
 
             // Creating the detection object
             // Avoid creating multiple detection objects for the same player and tick.
             // Nothing will break if you do, but it will overrepresent the data point.
-            if va_delta.abs() >= 180.0 || pa_delta.abs() >= 180.0 {
+            if va_delta.yaw.abs() > 179.0 || va_delta.pitch.abs() >= 179.0 {
                 detections.push(Detection {
                     tick: ticknum,
                     algorithm: self.algorithm_name().to_string(),
                     player: steam_id,
-                    data: json!({ "va_delta": va_delta, "pa_delta": pa_delta }),
+                    data: json!({ "delta_yaw": va_delta.yaw, "delta_pitch": va_delta.pitch }),
                 });
             }
         }

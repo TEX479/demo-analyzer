@@ -181,8 +181,8 @@ impl CheatAlgorithm for CrouchSpeed {
 
             // Wait at least 4 ticks after entering PVS to establish valid position deltas
             if pstate.pvs_ticks < 4 {
-                pstate.prev_pos = Some(player.position.into());
-                pstate.last_sample_pos = Some(player.position.into());
+                pstate.prev_pos = Some(player.position);
+                pstate.last_sample_pos = Some(player.position);
                 pstate.last_sample_tick = ticknum;
                 continue;
             }
@@ -210,14 +210,14 @@ impl CheatAlgorithm for CrouchSpeed {
                     pstate.current_speed_hu_s = dist_2d / dt;
                 }
 
-                pstate.last_sample_pos = Some(player.position.into());
+                pstate.last_sample_pos = Some(player.position);
                 pstate.last_sample_tick = ticknum;
             } else if ticknum.saturating_sub(pstate.last_sample_tick) > 4 {
                 // If no position packet has arrived for > 4 ticks (60ms), entity is stationary
                 pstate.current_speed_hu_s = 0.0;
             }
 
-            pstate.prev_pos = Some(player.position.into());
+            pstate.prev_pos = Some(player.position);
 
             let is_on_ground = player.is_on_ground();
             let is_ducking = player.is_ducking();
@@ -274,7 +274,6 @@ mod tests {
     use crate::base::cheat_analyser_base::PlayerState;
     use crate::base::cheat_analyser_base::Team;
     use tf_demo_parser::demo::parser::analyser::UserInfo;
-    use tf_demo_parser::demo::vector::Vector;
 
     fn make_test_player(steam_id: SteamID, class: Class) -> Player {
         Player {
@@ -282,7 +281,7 @@ mod tests {
             state: PlayerState::Alive,
             class,
             flags: 1 | (1 << 1), // ONGROUND (1) and DUCKING (2)
-            position: Vector { x: 0.0, y: 0.0, z: 0.0 },
+            position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
             info: Some(UserInfo {
                 classes: Default::default(),
                 name: "TestSubject".to_string(),

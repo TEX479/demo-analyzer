@@ -5,12 +5,12 @@ use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
-use tf_demo_parser::demo::vector::Vector;
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
+use crate::util::helpers::Vec3;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::nocrex::jankguard::JankGuard;
 
@@ -23,12 +23,12 @@ struct PlayerBhopState {
     hop_ground_ticks: Vec<u32>,
     hop_speeds: Vec<f32>,
     last_reported_streak: u32,
-    prev_pos: Option<Vector>,
+    prev_pos: Option<Vec3>,
     prev_on_ground: bool,
     last_movement_dz: f32,
     launch_z: f32,
     apex_z: f32,
-    last_pos_sample: Option<Vector>,
+    last_pos_sample: Option<Vec3>,
     last_pos_sample_tick: u32,
     current_speed_hu_s: f32,
 }

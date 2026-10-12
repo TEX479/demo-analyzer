@@ -5,6 +5,8 @@
 // - snapping up/down for auto rocketjump
 // - maybe some other cheats
 
+// PERF: check why this algorithm eats performance and if it can be improved, fix that
+
 use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::{
@@ -29,7 +31,6 @@ use tf_demo_parser::ParserState;
 #[derive(Default)]
 pub struct AimSnap {
     /// history of the last 5 ticks
-    ticks: Vec<(u32, KeyValueVec<SteamID, ViewAngle>)>,
     players: KeyValueVec<SteamID, AngleHistory>,
     jg: JankGuard,
     params: Parameters,
@@ -80,9 +81,6 @@ impl CheatAlgorithm for AimSnap {
 
         let noise_range: Range<f32> = noise_min..noise_max;
 
-        self.ticks.insert(0, (ticknum, Default::default()));
-        self.ticks.truncate(5);
-
         let mut players_to_remove = self.players.keys().to_vec();
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
@@ -100,7 +98,7 @@ impl CheatAlgorithm for AimSnap {
             }
 
             let angle_history = self.players.get_mut_or_insert_default(steam_id);
-            let Some(delta_magnitudes) = angle_history.push(ViewAngle::from(player)) else {
+            let Some(delta_magnitudes) = angle_history.push(player.view_angle) else {
                 continue;
             };
 

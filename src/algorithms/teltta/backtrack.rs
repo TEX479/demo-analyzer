@@ -112,7 +112,7 @@ impl CheatAlgorithm for BackTrack {
             let victim_health = victim.health;
 
             if attacker_uid != victim_uid && is_backstab(damage_amount, is_crit, weapon_id, victim_health) {
-                let angle_diff = angle_diff(attacker.view_angle, victim.view_angle).abs();
+                let angle_diff = angle_diff(attacker.view_angle.yaw, victim.view_angle.yaw).abs();
 
                 // 3d distance
                 // let pos_diff = (f32::powi(attacker_pos.x - victim_pos.x, 2) +
@@ -141,8 +141,8 @@ impl CheatAlgorithm for BackTrack {
                     // TODO: understand (or change) the following part. (like *why* is it the way it is)
                     let u200b = "\u{200b}";
                     let data: Vec<(&str, Value)> = vec![
-                        ("angle_attacker", Value::from(attacker.view_angle)),
-                        ("angle_victim", Value::from(victim.view_angle)),
+                        ("angle_attacker", Value::from(attacker.view_angle.yaw)),
+                        ("angle_victim", Value::from(victim.view_angle.yaw)),
                         ("angle_diff", Value::from(angle_diff)),
                         ("pos_attacker", Value::from(vec![attacker_pos.x, attacker_pos.y, attacker_pos.z])),
                         ("pos_victim", Value::from(vec![victim_pos.x, victim_pos.y, victim_pos.z])),

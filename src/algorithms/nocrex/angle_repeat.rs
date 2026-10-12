@@ -11,7 +11,6 @@ use crate::{
     util::{
         helpers::{
             KeyValueVec, ViewAngle,
-            geometry::viewangle_delta,
             player_finders::{players_alive_and_in_pvs, valid_players},
         },
         nocrex::jankguard::JankGuard,
@@ -90,7 +89,7 @@ impl CheatAlgorithm for AngleRepeat {
                 continue;
             }
 
-            let third_angle = ViewAngle::from(player);
+            let third_angle = player.view_angle;
             _ = self
                 .ticks
                 .get_mut(0)
@@ -155,9 +154,9 @@ impl CheatAlgorithm for AngleRepeat {
 }
 
 fn calc_real_delta(tick_old: u32, angle_old: ViewAngle, tick_new: u32, angle_new: ViewAngle) -> f32 {
-    let tick_delta = tick_new.saturating_sub(tick_old);
+    let tick_delta = tick_new.saturating_sub(tick_old).max(1);
 
-    let (va_real, pa_real) = viewangle_delta(angle_new, angle_old, tick_delta);
+    let va_real = angle_old.viewangle_delta(angle_new) / tick_delta as f32;
 
-    (va_real * va_real + pa_real * pa_real).sqrt()
+    va_real.magnitude()
 }

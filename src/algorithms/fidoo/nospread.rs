@@ -13,7 +13,7 @@ use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
-use crate::util::helpers::geometry::viewangle_delta;
+use crate::util::helpers::geometry::ViewAngleDelta;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
 use crate::util::helpers::{ViewAngle, handle_to_entid};
 use crate::util::nocrex::jankguard::JankGuard;
@@ -215,7 +215,7 @@ impl UniformRandomStream {
     }
 }
 
-fn compute_predicted_spread(seed: i32, spread_factor: f32) -> (f32, f32) {
+fn compute_predicted_spread(seed: i32, spread_factor: f32) -> ViewAngleDelta {
     let mut rng = UniformRandomStream::default();
     rng.set_seed(seed & 255);
     let x = rng.random_float(-0.5, 0.5) + rng.random_float(-0.5, 0.5);
@@ -224,7 +224,8 @@ fn compute_predicted_spread(seed: i32, spread_factor: f32) -> (f32, f32) {
     let rad_to_deg = 180.0 / std::f32::consts::PI;
     let dx = x * spread_factor * rad_to_deg;
     let dy = y * spread_factor * rad_to_deg;
-    (dx, dy)
+    // TODO: check if dx & dy need to be swapped
+    ViewAngleDelta { yaw: dx, pitch: dy }
 }
 
 fn p_value_from_t(t: f64) -> f64 {
@@ -267,8 +268,6 @@ fn resolve_player_sid(player_raw: u32, state: &CheatAnalyserState) -> Option<Ste
 
 pub type Tick = u32;
 
-pub type AngleDelta = (f32, f32);
-
 #[derive(Clone, Debug)]
 struct ReversalEvent {
     tick: Tick,
@@ -279,7 +278,7 @@ struct ReversalEvent {
 struct PlayerTracker {
     last_flag_tick: Tick,
     reversals: Vec<ReversalEvent>,
-    shot_samples: Vec<(Tick, AngleDelta, Option<i32>, Option<f32>)>, // tick, delta, seed, spread
+    shot_samples: Vec<(Tick, ViewAngleDelta, Option<i32>, Option<f32>)>, // tick, delta, seed, spread
     current_weapon: Option<WeaponSpreadInfo>,
 }
 
@@ -306,7 +305,7 @@ pub struct NoSpread {
     params: Parameters,
     jg: JankGuard,
     prev_players: HashMap<SteamID, (ViewAngle, Tick)>,
-    player_tick_deltas: HashMap<SteamID, HashMap<Tick, (f32, f32)>>, // sid -> tick -> (dp, dy)
+    player_tick_deltas: HashMap<SteamID, HashMap<Tick, ViewAngleDelta>>,
     player_trackers: HashMap<SteamID, PlayerTracker>,
     fire_events: HashMap<SteamID, Vec<FireEvent>>,
     detections: Vec<Detection>,
@@ -351,37 +350,32 @@ impl PlayerTracker {
                 preds.push(pred);
             }
 
-            let count = deltas.len();
-            let mean_d_yaw: f32 = deltas.iter().map(|(y, _)| *y).sum::<f32>() / count as f32;
-            let mean_d_pitch: f32 = deltas.iter().map(|(_, p)| *p).sum::<f32>() / count as f32;
-            let mean_p_x: f32 = preds.iter().map(|(x, _)| *x).sum::<f32>() / count as f32;
-            let mean_p_y: f32 = preds.iter().map(|(_, y)| *y).sum::<f32>() / count as f32;
+            let multiplier = 1.0 / (deltas.len().max(1)) as f32;
+            let mean_delta = deltas.iter().fold(ViewAngleDelta::default(), |acc, &va| acc + va) * multiplier;
+            let mean_predicion = preds.iter().fold(ViewAngleDelta::default(), |acc, &va| acc + va) * multiplier;
 
             let mut cov = 0.0f32;
             let mut var_d = 0.0f32;
             let mut var_p = 0.0f32;
             let mut total_residual = 0.0f32;
 
-            for i in 0..count {
-                let dy = deltas[i].0 - mean_d_yaw;
-                let dp = deltas[i].1 - mean_d_pitch;
-                let px = preds[i].0 - mean_p_x;
-                let py = preds[i].1 - mean_p_y;
+            for (&delta, &pred) in deltas.iter().zip(preds.iter()) {
+                let d = delta - mean_delta;
+                let p = pred - mean_predicion;
 
-                cov += dy * px + dp * py;
-                var_d += dy * dy + dp * dp;
-                var_p += px * px + py * py;
+                cov += d.dot(p);
+                var_d += d.dot(d);
+                var_p += p.dot(p);
 
-                let res_x = deltas[i].0 + preds[i].0;
-                let res_y = deltas[i].1 + preds[i].1;
-                total_residual += (res_x * res_x + res_y * res_y).sqrt();
+                let res = delta + pred;
+                total_residual += res.magnitude();
             }
 
             let denom = (var_d * var_p).sqrt();
             let r = if denom > 1e-7 { cov / denom } else { 0.0 };
-            let mean_residual = total_residual / count as f32;
+            let mean_residual = total_residual * multiplier;
 
-            let df = (count - 2) as f64;
+            let df = deltas.len() as f64 - 2_f64;
             let r_f64 = r as f64;
             let t_stat = r_f64 * (df / (1.0 - r_f64 * r_f64).max(1e-7)).sqrt();
             let p_val = p_value_from_t(t_stat);
@@ -396,7 +390,7 @@ impl PlayerTracker {
                         "type": "SeedCorrelation",
                         "weapon_id": weapon_info.category_id,
                         "weapon_name": weapon_info.name,
-                        "shot_count": count,
+                        "shot_count": deltas.len(),
                         "correlation_coefficient": (r * 1000.0).round() / 1000.0,
                         "p_value": (p_val * 100000.0).round() / 100000.0,
                         "mean_residual_degrees": (mean_residual * 1000.0).round() / 1000.0,
@@ -526,24 +520,24 @@ impl CheatAlgorithm for NoSpread {
                 if ticks_since_event == 0 {
                     self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
                 }
-                self.prev_players.insert(steam_id, (player.into(), ticknum));
+                self.prev_players.insert(steam_id, (player.view_angle, ticknum));
                 continue;
             }
 
             let (prev_angle, prev_tick) = match self.prev_players.get(&steam_id) {
                 Some(&p) => p,
                 None => {
-                    self.prev_players.insert(steam_id, (player.into(), ticknum));
+                    self.prev_players.insert(steam_id, (player.view_angle, ticknum));
                     continue;
                 }
             };
 
             if ticknum == prev_tick + 1 {
-                let (va_delta, pa_delta) = viewangle_delta(player.into(), prev_angle, 1);
-                self.player_tick_deltas.entry(steam_id).or_default().insert(ticknum, (pa_delta, va_delta));
+                let va_delta = prev_angle.viewangle_delta(player.view_angle);
+                self.player_tick_deltas.entry(steam_id).or_default().insert(ticknum, va_delta);
             }
 
-            self.prev_players.insert(steam_id, (player.into(), ticknum));
+            self.prev_players.insert(steam_id, (player.view_angle, ticknum));
 
             // Process bullet fire events for this player
             if let Some(events) = self.fire_events.get(&steam_id)
@@ -566,14 +560,14 @@ impl CheatAlgorithm for NoSpread {
                     if let Some(deltas) = self.player_tick_deltas.get(&steam_id) {
                         // Check single-tick flick and return reversal at f_tick or f_tick+1
                         for t in f_tick..=f_tick + 1 {
-                            let (Some(&(dp1, dy1)), Some(&(dp2, dy2))) = (deltas.get(&t), deltas.get(&(t + 1))) else {
+                            let (Some(&d1), Some(&d2)) = (deltas.get(&t), deltas.get(&(t + 1))) else {
                                 continue;
                             };
-                            let mag1 = (dp1 * dp1 + dy1 * dy1).sqrt();
-                            let mag2 = (dp2 * dp2 + dy2 * dy2).sqrt();
+                            let mag1 = d1.magnitude();
+                            let mag2 = d2.magnitude();
 
-                            let dot = dp1 * dp2 + dy1 * dy2;
-                            let sum_mag = ((dp1 + dp2).powi(2) + (dy1 + dy2).powi(2)).sqrt();
+                            let dot = d1.dot(d2);
+                            let sum_mag = (d1 + d2).magnitude();
 
                             let max_cone = weapon_info.map_or(2.5, |w| w.max_cone_degrees) + spread_tolerance_margin;
 
@@ -591,7 +585,7 @@ impl CheatAlgorithm for NoSpread {
                             // Confirmed micro-reversal
                             tracker.reversals.push(ReversalEvent { tick: t, magnitude: mag1 });
 
-                            tracker.shot_samples.push((t, (dy1, dp1), seed, spread));
+                            tracker.shot_samples.push((t, d1, seed, spread));
 
                             let recent_count = tracker.reversals.iter().filter(|r| ticknum.saturating_sub(r.tick) <= 600).count();
 

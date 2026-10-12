@@ -1,60 +1,8 @@
-use crate::base::cheat_analyser_base::Player;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
-    ops::{Add, Neg, Sub},
+    ops::{Add, Div, Mul, Neg, Sub},
 };
-
-pub static F32_EPSILON: f32 = 0.00001;
-
-/// Compute the difference in viewangles. We have to account for the fact viewangles are in a circle.
-/// E.g. If viewangle goes from 350 to 10 degrees, we want to return 20 degrees.
-/// This function takes the tick-delta into account.
-///
-/// The returned values can be thought of the offset the player had to move their mouse to.
-///
-/// This does *not* equal the angular difference, since when looking up/down, the angular difference decreases compared to the mouse movement
-///
-/// # Example
-/// ```
-/// # use analysis_template::util::helpers::geometry::{viewangle_delta, ViewAngle};
-/// let va1 = ViewAngle { yaw: 0.0, pitch: 0.0 };
-/// let va2 = ViewAngle { yaw: 90.0, pitch: 0.0 };
-/// let (delta_yaw, delta_pitch) = viewangle_delta(va1, va2, 1);
-/// assert!(floats_are_equal(delta_yaw, -90.0));
-/// assert!(floats_are_equal(delta_pitch, 0.0));
-///
-/// let va1 = ViewAngle { yaw: 0.0, pitch: 0.0 };
-/// let va2 = ViewAngle { yaw: 90.0, pitch: 0.0 };
-/// let (delta_yaw, delta_pitch) = viewangle_delta(va1, va2, 2);
-/// assert!(floats_are_equal(delta_yaw, -45.0));
-/// assert!(floats_are_equal(delta_pitch, 0.0));
-///
-/// // in this case, the actual world angles are very close
-/// // this demonstrates the difference to `ViewAngle::delta`
-/// let va1 = ViewAngle { yaw: 0.0, pitch: 85.0 };
-/// let va2 = ViewAngle { yaw: 90.0, pitch: 89.0 };
-/// let (delta_yaw, delta_pitch) = viewangle_delta(va1, va2, 1);
-/// assert!(floats_are_equal(delta_yaw, -90.0));
-/// assert!(floats_are_equal(delta_pitch, -4.0));
-///
-///
-/// // since floating point operations have rounding, compare using some epsilon
-/// const EPSILON: f32 = 0.001;
-/// fn floats_are_equal(f1: f32, f2: f32) -> bool {
-///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
-/// }
-/// ```
-// TODO: move to `ViewAngle`s & maybe remove `tick_delta` parameter
-pub fn viewangle_delta(current_angle: ViewAngle, previous_angle: ViewAngle, tick_delta: u32) -> (f32, f32) {
-    let tick_delta = tick_delta.max(1);
-    let va_delta = {
-        let diff = (current_angle.yaw - previous_angle.yaw).rem_euclid(360.0);
-        if diff > 180.0 { diff - 360.0 } else { diff }
-    } / tick_delta as f32;
-    let pa_delta = (current_angle.pitch - previous_angle.pitch) / tick_delta as f32;
-    (va_delta, pa_delta)
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Vec3 {
@@ -129,7 +77,7 @@ impl ViewAngle {
     ///
     /// # Example
     /// ```
-    /// # use analysis_template::util::helpers::geometry::{viewangle_delta, ViewAngle, ViewAngleDelta};
+    /// # use analysis_template::util::helpers::geometry::{ViewAngle, ViewAngleDelta};
     ///
     /// let va1 = ViewAngle { yaw: 0.0, pitch: 0.0 };
     /// let va2 = ViewAngle { yaw: 90.0, pitch: 0.0 };
@@ -296,7 +244,7 @@ impl Vec3 {
     /// ```
     #[inline(always)]
     pub const fn length_square(self) -> f32 {
-        self.x * self.x + self.y * self.y + self.z * self.z
+        self.dot(self)
     }
 
     /// returns the normalized vector
@@ -336,7 +284,48 @@ impl Vec3 {
     /// }
     /// ```
     pub fn normalized(self) -> Self {
-        self.scaled(1.0 / self.length())
+        self / self.length()
+    }
+
+    /// returns the normalized vector
+    ///
+    /// `normalized` in this case means "a vector which has a length of 1.0"
+    ///
+    /// # Division By Zero
+    /// This method devides by the length of the vector. If the vector's length is zero
+    /// or `f32::NAN`s appear anywhere within the output, `None` is returned instead.
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::Vec3;
+    /// let v1 = Vec3 { x: 2.0, y: 0.0, z: 0.0 };
+    /// let v2 = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
+    /// assert_eq!(v1.checked_normalized(), Some(v2));
+    ///
+    /// let v1 = Vec3 { x: 12.0, y: 15.0, z: 16.0 };
+    /// let v2 = Vec3 { x: 0.48, y: 0.6, z: 0.64 };
+    /// assert!(vecs_equal(v1.checked_normalized().expect("v1 is non-zero and non-NaN and thus has to be valid"), v2));
+    ///
+    /// let v = Vec3 { x: 0.0, y: 0.0, z: 0.0 }.normalized();
+    /// assert_eq!(v.checked_normalized(), None);
+    ///
+    /// let v = Vec3 { x: 1.0, y: 0.0, z: f32::NAN };
+    /// assert_eq!(v.checked_normalized(), None);
+    ///
+    /// // since floating point operations have rounding, compare using some epsilon
+    /// const EPSILON: f32 = 0.00001;
+    /// fn vecs_equal(v1: Vec3, v2: Vec3) -> bool {
+    ///     floats_are_equal(v1.x, v2.x)
+    ///     && floats_are_equal(v1.y, v2.y)
+    ///     && floats_are_equal(v1.z, v2.z)
+    /// }
+    /// fn floats_are_equal(f1: f32, f2: f32) -> bool {
+    ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
+    /// }
+    /// ```
+    pub fn checked_normalized(self) -> Option<Self> {
+        let v = self.normalized();
+        if v.is_nan() { None } else { Some(v) }
     }
 
     /// performs the cross product
@@ -456,7 +445,7 @@ impl ViewAngleDelta {
     /// }
     /// ```
     pub const fn magnitude_squared(self) -> f32 {
-        self.yaw * self.yaw + self.pitch * self.pitch
+        self.dot(self)
     }
 
     /// checks if a field of self is NaN
@@ -471,6 +460,24 @@ impl ViewAngleDelta {
     /// ```
     pub fn is_nan(&self) -> bool {
         self.yaw.is_nan() || self.pitch.is_nan()
+    }
+
+    /// performs the dot product with rhs
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::ViewAngleDelta;
+    ///
+    /// let v1 = ViewAngleDelta { yaw: 2.0, pitch: 3.0 };
+    /// let v2 = ViewAngleDelta { yaw: 0.0, pitch: 4.0 };
+    /// assert_eq!(v1.dot(v2), 12.0);
+    ///
+    /// let v1 = ViewAngleDelta { yaw: 1.0, pitch: 0.0 };
+    /// let v2 = ViewAngleDelta { yaw: 0.0, pitch: 2.0 };
+    /// assert_eq!(v1.dot(v2), 0.0);
+    /// ```
+    pub const fn dot(self, rhs: ViewAngleDelta) -> f32 {
+        self.yaw * rhs.yaw + self.pitch * rhs.pitch
     }
 }
 
@@ -505,13 +512,93 @@ impl Neg for Vec3 {
         }
     }
 }
-
-impl From<&Player> for ViewAngle {
-    fn from(value: &Player) -> Self {
+impl Mul<f32> for Vec3 {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        self.scaled(rhs)
+    }
+}
+impl Div<f32> for Vec3 {
+    type Output = Self;
+    fn div(self, rhs: f32) -> Self::Output {
         Self {
-            yaw: value.view_angle,
-            pitch: value.pitch_angle,
+            x: self.x / rhs,
+            y: self.y / rhs,
+            z: self.z / rhs,
         }
+    }
+}
+
+impl Add for ViewAngleDelta {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            yaw: self.yaw + rhs.yaw,
+            pitch: self.pitch + rhs.pitch,
+        }
+    }
+}
+impl Sub for ViewAngleDelta {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            yaw: self.yaw - rhs.yaw,
+            pitch: self.pitch - rhs.pitch,
+        }
+    }
+}
+impl Neg for ViewAngleDelta {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Self {
+            yaw: self.yaw.neg(),
+            pitch: self.pitch.neg(),
+        }
+    }
+}
+impl Mul<f32> for ViewAngleDelta {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        Self {
+            yaw: self.yaw * rhs,
+            pitch: self.pitch * rhs,
+        }
+    }
+}
+impl Div<f32> for ViewAngleDelta {
+    type Output = Self;
+    fn div(self, rhs: f32) -> Self::Output {
+        Self {
+            yaw: self.yaw / rhs,
+            pitch: self.pitch / rhs,
+        }
+    }
+}
+
+impl Add<ViewAngleDelta> for ViewAngle {
+    type Output = Self;
+    fn add(self, rhs: ViewAngleDelta) -> Self::Output {
+        let mut yaw = self.yaw + rhs.yaw;
+        let mut pitch = (self.pitch + rhs.pitch).rem_euclid(360.0);
+        pitch = if pitch > 180.0 { pitch - 360.0 } else { pitch };
+        if pitch > 90.0 {
+            pitch -= 90.0;
+            yaw += 180.0;
+        } else if pitch < -90.0 {
+            pitch += 90.0;
+            yaw += 180.0;
+        }
+        yaw = yaw.rem_euclid(360.0);
+        Self {
+            yaw: if yaw > 180.0 { yaw - 360.0 } else { yaw },
+            pitch,
+        }
+    }
+}
+impl Sub<ViewAngleDelta> for ViewAngle {
+    type Output = Self;
+    fn sub(self, rhs: ViewAngleDelta) -> Self::Output {
+        self + (-rhs)
     }
 }
 
@@ -528,6 +615,7 @@ impl From<Vec3> for tf_demo_parser::demo::vector::Vector {
     }
 }
 
+/*
 impl TryFrom<Vec3> for ViewAngle {
     // TODO: get some real error type
     type Error = ();
@@ -535,5 +623,41 @@ impl TryFrom<Vec3> for ViewAngle {
     fn try_from(value: Vec3) -> Result<Self, Self::Error> {
         // TODO: implement
         todo!()
+    }
+}
+// */
+
+impl From<Vec3> for ViewAngle {
+    /// gets the viewangle along the provided `Vec3`
+    ///
+    /// if the vector is of length 0, the return value is the default `0,0`
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::{Vec3, ViewAngle};
+    ///
+    /// let vector = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
+    /// let expected_viewangle = ViewAngle { yaw: 0.0, pitch: 0.0 };
+    /// assert_eq!(ViewAngle::from(vector), expected_viewangle);
+    ///
+    /// let vector = Vec3 { x: 1.0, y: 1.0, z: 2_f32.sqrt() };
+    /// let expected_viewangle = ViewAngle { yaw: 45.0, pitch: -45.0 };
+    /// assert_eq!(ViewAngle::from(vector), expected_viewangle);
+    /// ```
+    fn from(value: Vec3) -> Self {
+        // This code is basically a untested copy from `fidoo/psilent4.rs`
+
+        let horizontal = (value.x * value.x + value.y * value.y).sqrt();
+        Self {
+            yaw: value.y.atan2(value.x).to_degrees(),
+            pitch: (-value.z).atan2(horizontal).to_degrees(),
+        }
+    }
+}
+
+impl TryFrom<&tf_demo_parser::demo::sendprop::SendPropValue> for Vec3 {
+    type Error = tf_demo_parser::demo::parser::MalformedSendPropDefinitionError;
+    fn try_from(value: &tf_demo_parser::demo::sendprop::SendPropValue) -> Result<Self, Self::Error> {
+        tf_demo_parser::demo::vector::Vector::try_from(value).map(Vec3::from)
     }
 }

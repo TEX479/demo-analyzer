@@ -7,14 +7,12 @@ use steamid_ng::SteamID;
 use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::message::packetentities::{EntityId, UpdateType};
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
-use tf_demo_parser::demo::vector::Vector;
 use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
-use crate::util::helpers::geometry::viewangle_delta;
 use crate::util::helpers::{Vec3, ViewAngle, handle_to_entid};
 
 const HISTORY_TICKS: u32 = 40;
@@ -41,8 +39,8 @@ impl PlayerSnapshot {
     fn new(tick: u32, player: &Player) -> Self {
         Self {
             tick,
-            position: player.position.into(),
-            angle: player.into(),
+            position: player.position,
+            angle: player.view_angle,
             simtime: player.simtime,
             in_pvs: player.in_pvs,
             state: player.state,
@@ -279,7 +277,7 @@ impl CheatAlgorithm for Psilent5 {
             let pipe_type = projectile_integer(&props, &[("DT_TFProjectile_Pipebomb", "m_iType")]);
 
             let max_owner_distance = self.params.max_owner_distance;
-            let offset = origin - player.position.into();
+            let offset = origin - player.position;
             let owner_distance = offset.length();
             if !owner_distance.is_finite() || owner_distance > max_owner_distance {
                 continue;
@@ -420,24 +418,14 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         let steps = if tick_gap == 0 { 4 } else { (tick_gap.min(8) * 2).max(4) };
         for step in 1..steps {
             let fraction = step as f32 / steps as f32;
-            let (va_diff, pa_diff) = viewangle_delta(s2.angle, s1.angle, 1);
-            let interp_yaw = (s1.angle.yaw + va_diff * fraction).rem_euclid(360.0);
-            let interp_pitch = (s1.angle.pitch + pa_diff * fraction).clamp(-89.0, 89.0);
-            let interp_pos = Vec3 {
-                x: s1.position.x + (s2.position.x - s1.position.x) * fraction,
-                y: s1.position.y + (s2.position.y - s1.position.y) * fraction,
-                z: s1.position.z + (s2.position.z - s1.position.z) * fraction,
-            };
+            let va_diff = s1.angle.viewangle_delta(s2.angle);
+            // TODO: check if pitch clamping is really necessary.
+            // if so, manually calculate `interp`. check commit 556b7c379c8e for how this was done
+            let interp_angle = s1.angle + va_diff * fraction;
+            let interp_pos = s1.position + (s2.position - s1.position) * fraction;
             let interp_tick_float = s1.tick as f32 + (s2.tick as f32 - s1.tick as f32) * fraction;
             let interp_tick = interp_tick_float.round() as u32;
-            test_views.push((
-                interp_tick,
-                interp_pos,
-                ViewAngle {
-                    yaw: interp_yaw,
-                    pitch: interp_pitch,
-                },
-            ));
+            test_views.push((interp_tick, interp_pos, interp_angle));
         }
     }
 
@@ -748,7 +736,7 @@ fn projectile_vector(props: &[tf_demo_parser::demo::sendprop::SendProp], identif
         props
             .iter()
             .find(|prop| prop.identifier == identifier)
-            .and_then(|prop| Vector::try_from(&prop.value).ok().map(Vec3::from))
+            .and_then(|prop| Vec3::try_from(&prop.value).ok())
     })
 }
 

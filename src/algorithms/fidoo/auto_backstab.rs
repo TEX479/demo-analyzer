@@ -10,15 +10,14 @@ use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::message::packetentities::{EntityId, UpdateType};
 use tf_demo_parser::demo::parser::analyser::{Class, UserId};
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
-use tf_demo_parser::demo::vector::Vector;
 use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
-use crate::util::helpers::handle_to_entid;
 use crate::util::helpers::player_finders::player_with_uid;
+use crate::util::helpers::{Vec3, handle_to_entid};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const ATTACK_HISTORY_MAX_TICKS: u32 = 32;
@@ -27,9 +26,9 @@ const SNAPSHOT_HISTORY_MAX_TICKS: u32 = 64;
 #[derive(Clone, Debug)]
 struct PlayerSnapshot {
     tick: u32,
-    position: Vector,
-    view_angle: f32, // yaw
-    velocity: Vector,
+    position: Vec3,
+    view_angle_yaw: f32, // yaw
+    velocity: Vec3,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -187,22 +186,22 @@ impl AutoBackstab {
                     history.iter().rev().nth(0).map(|prev| {
                         let dt = (tick.saturating_sub(prev.tick)) as f32 * 0.015;
                         if dt > 0.001 {
-                            Vector {
+                            Vec3 {
                                 x: (player.position.x - prev.position.x) / dt,
                                 y: (player.position.y - prev.position.y) / dt,
                                 z: (player.position.z - prev.position.z) / dt,
                             }
                         } else {
-                            Vector { x: 0.0, y: 0.0, z: 0.0 }
+                            Vec3 { x: 0.0, y: 0.0, z: 0.0 }
                         }
                     })
                 })
-                .unwrap_or(Vector { x: 0.0, y: 0.0, z: 0.0 });
+                .unwrap_or(Vec3 { x: 0.0, y: 0.0, z: 0.0 });
 
             let snapshot = PlayerSnapshot {
                 tick,
                 position: player.position,
-                view_angle: player.view_angle,
+                view_angle_yaw: player.view_angle.yaw,
                 velocity,
             };
 
@@ -258,7 +257,7 @@ impl AutoBackstab {
 
                 if dist <= 300.0 {
                     let aim_yaw = dy.atan2(dx).to_degrees();
-                    let aim_fov = ((aim_yaw - spy.view_angle + 180.0).rem_euclid(360.0) - 180.0).abs();
+                    let aim_fov = ((aim_yaw - spy.view_angle_yaw + 180.0).rem_euclid(360.0) - 180.0).abs();
                     sum_fov += aim_fov;
                     last_fov = aim_fov;
 
@@ -311,7 +310,7 @@ impl AutoBackstab {
         let mut max_flick = 0.0f32;
 
         for window in snaps.windows(2) {
-            let angle_delta = ((window[1].view_angle - window[0].view_angle + 180.0).rem_euclid(360.0) - 180.0).abs();
+            let angle_delta = ((window[1].view_angle_yaw - window[0].view_angle_yaw + 180.0).rem_euclid(360.0) - 180.0).abs();
             if angle_delta > max_flick {
                 max_flick = angle_delta;
             }
@@ -377,8 +376,6 @@ impl CheatAlgorithm for AutoBackstab {
         if !types.contains(&MessageType::GameEvent) {
             types.push(MessageType::GameEvent);
         }
-        types.sort_by_key(|a| format!("{:?}", a));
-        types.dedup();
         Ok(types)
     }
 
@@ -527,9 +524,9 @@ impl CheatAlgorithm for AutoBackstab {
                         let dist3d = (dx * dx + dy * dy + dz * dz).sqrt();
 
                         let aim_yaw = dy.atan2(dx).to_degrees();
-                        let aim_fov = ((aim_yaw - attacker.view_angle + 180.0).rem_euclid(360.0) - 180.0).abs();
+                        let aim_fov = ((aim_yaw - attacker.view_angle.yaw + 180.0).rem_euclid(360.0) - 180.0).abs();
 
-                        let angle_diff = ((attacker.view_angle - victim.view_angle + 180.0).rem_euclid(360.0) - 180.0).abs();
+                        let angle_diff = ((attacker.view_angle.yaw - victim.view_angle.yaw + 180.0).rem_euclid(360.0) - 180.0).abs();
 
                         let tracker = self.spy_states.entry(attacker_sid).or_default();
                         let t_attack = ticknum;
@@ -799,12 +796,14 @@ fn format_class_name(class: Class) -> &'static str {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use crate::util::helpers::ViewAngle;
+
     use super::*;
     use tf_demo_parser::demo::gameevent_gen::PlayerHurtEvent;
     use tf_demo_parser::demo::message::gameevent::GameEventMessage;
     use tf_demo_parser::demo::parser::analyser::{Team, UserId, UserInfo};
 
-    fn create_test_player(entity_id: u32, user_id: u32, steam_id: &str, class: Class, pos: Vector, health: u16) -> Player {
+    fn create_test_player(entity_id: u32, user_id: u32, steam_id: &str, class: Class, pos: Vec3, health: u16) -> Player {
         Player {
             entity: EntityId::from(entity_id),
             position: pos,
@@ -812,8 +811,7 @@ mod tests {
             max_health: health,
             class,
             team: Team::Blue,
-            view_angle: 0.0,
-            pitch_angle: 0.0,
+            view_angle: ViewAngle::default(),
             state: PlayerState::Alive,
             info: Some(UserInfo {
                 classes: Default::default(),
@@ -833,6 +831,10 @@ mod tests {
             cond_ex2: 0,
             invis_change_complete_time: 0.0,
             flags: 1,
+
+            last_spawn: 0,
+            last_fire: 0,
+            last_teleport: 0,
         }
     }
 
@@ -854,8 +856,8 @@ mod tests {
         let spy_sid = SteamID::from_steam3(spy_steam).unwrap();
         let medic_sid = SteamID::from_steam3(medic_steam).unwrap();
 
-        let spy = create_test_player(1, 1, spy_steam, Class::Spy, Vector { x: 890.0, y: -320.0, z: 128.0 }, 125);
-        let medic = create_test_player(2, 6, medic_steam, Class::Medic, Vector { x: 840.5, y: -310.2, z: 128.0 }, 150);
+        let spy = create_test_player(1, 1, spy_steam, Class::Spy, Vec3 { x: 890.0, y: -320.0, z: 128.0 }, 125);
+        let medic = create_test_player(2, 6, medic_steam, Class::Medic, Vec3 { x: 840.5, y: -310.2, z: 128.0 }, 150);
 
         state.players = vec![spy, medic];
         state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
@@ -906,10 +908,10 @@ mod tests {
         for tick in 19295..=19310 {
             state.tick = tick.into();
             let spy_x = -200.0 + (tick - 19295) as f32 * 10.0;
-            let mut spy = create_test_player(1, 1, spy_steam, Class::Spy, Vector { x: spy_x, y: 0.0, z: 0.0 }, 125);
-            spy.view_angle = 0.0;
-            let mut pyro = create_test_player(2, 6, pyro_steam, Class::Pyro, Vector { x: 0.0, y: 0.0, z: 0.0 }, 175);
-            pyro.view_angle = 0.0;
+            let mut spy = create_test_player(1, 1, spy_steam, Class::Spy, Vec3 { x: spy_x, y: 0.0, z: 0.0 }, 125);
+            spy.view_angle.yaw = 0.0;
+            let mut pyro = create_test_player(2, 6, pyro_steam, Class::Pyro, Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 175);
+            pyro.view_angle.yaw = 0.0;
 
             state.players = vec![spy, pyro];
             state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
@@ -952,8 +954,8 @@ mod tests {
         let spy_sid = SteamID::from_steam3(spy_steam).unwrap();
         let medic_sid = SteamID::from_steam3(medic_steam).unwrap();
 
-        let spy = create_test_player(1, 1, spy_steam, Class::Spy, Vector { x: 890.0, y: -320.0, z: 128.0 }, 125);
-        let medic = create_test_player(2, 6, medic_steam, Class::Medic, Vector { x: 840.5, y: -310.2, z: 128.0 }, 150);
+        let spy = create_test_player(1, 1, spy_steam, Class::Spy, Vec3 { x: 890.0, y: -320.0, z: 128.0 }, 125);
+        let medic = create_test_player(2, 6, medic_steam, Class::Medic, Vec3 { x: 840.5, y: -310.2, z: 128.0 }, 150);
 
         state.players = vec![spy, medic];
         state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
@@ -998,10 +1000,10 @@ mod tests {
         let spy_sid = SteamID::from_steam3(spy_steam).unwrap();
         let sniper_sid = SteamID::from_steam3(sniper_steam).unwrap();
 
-        let mut spy = create_test_player(1, 1, spy_steam, Class::Spy, Vector { x: 890.0, y: -320.0, z: 128.0 }, 125);
-        spy.view_angle = 180.0;
-        let mut sniper = create_test_player(2, 6, sniper_steam, Class::Sniper, Vector { x: 840.5, y: -320.0, z: 128.0 }, 125);
-        sniper.view_angle = 180.0;
+        let mut spy = create_test_player(1, 1, spy_steam, Class::Spy, Vec3 { x: 890.0, y: -320.0, z: 128.0 }, 125);
+        spy.view_angle.yaw = 180.0;
+        let mut sniper = create_test_player(2, 6, sniper_steam, Class::Sniper, Vec3 { x: 840.5, y: -320.0, z: 128.0 }, 125);
+        sniper.view_angle.yaw = 180.0;
 
         state.players = vec![spy, sniper];
         state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
@@ -1046,8 +1048,8 @@ mod tests {
         let spy_sid = SteamID::from_steam3(spy_steam).unwrap();
         let medic_sid = SteamID::from_steam3(medic_steam).unwrap();
 
-        let spy = create_test_player(1, 1, spy_steam, Class::Spy, Vector { x: 1000.0, y: 0.0, z: 0.0 }, 125);
-        let medic = create_test_player(2, 6, medic_steam, Class::Medic, Vector { x: 1220.0, y: 0.0, z: 0.0 }, 150);
+        let spy = create_test_player(1, 1, spy_steam, Class::Spy, Vec3 { x: 1000.0, y: 0.0, z: 0.0 }, 125);
+        let medic = create_test_player(2, 6, medic_steam, Class::Medic, Vec3 { x: 1220.0, y: 0.0, z: 0.0 }, 150);
 
         state.players = vec![spy, medic];
         state.set_entid_to_userid(EntityId::from(1u32), UserId::from(1u16));
