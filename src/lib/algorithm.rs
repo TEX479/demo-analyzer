@@ -117,6 +117,7 @@ pub trait CheatAlgorithm {
     // Try the write_to_file algorithm to see what those states look like (there is one state per line)
     // cargo run -- -i demo.dem -a write_to_file
     fn on_tick(&mut self, _state: &CheatAnalyserState, _parser_state: &ParserState) -> Result<Vec<Detection>, Error> {
+        // TODO: remove result if algos can not fail
         Ok(vec![])
     }
 

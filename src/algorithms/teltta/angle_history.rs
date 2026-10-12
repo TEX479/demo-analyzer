@@ -90,7 +90,11 @@ impl CheatAlgorithm for AngleHistory {
                 .iter()
                 .enumerate()
                 .skip(1)
-                .filter_map(|(i, past_instance)| past_instance.get(&steam_id).map(|past_viewangle| (i, current_angle.delta(*past_viewangle))))
+                .filter_map(|(i, past_instance)| {
+                    past_instance
+                        .get(&steam_id)
+                        .map(|past_viewangle| (i, current_angle.world_angle_delta(*past_viewangle)))
+                })
                 .find(|(_, delta)| *delta < max_delta_first_third)
             else {
                 continue;
@@ -108,7 +112,7 @@ impl CheatAlgorithm for AngleHistory {
                 .iter()
                 .filter_map(|m| self.ticks.get(*m).and_then(|map| map.get(&steam_id)).map(|x| (m, *x)))
             {
-                let mid_delta = current_angle.delta(mid_angle);
+                let mid_delta = current_angle.world_angle_delta(mid_angle);
 
                 if mid_delta > min_delta_second_third && self.jg.fired(&steam_id, ticknum) <= (match_index as u32 + 5) {
                     self.detections.push(Detection {

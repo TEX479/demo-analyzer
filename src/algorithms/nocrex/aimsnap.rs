@@ -1,4 +1,9 @@
-// Written by Nocrex, Patched for Command Batching by Ciam
+// Written by Nocrex, Patched for Command Batching by Ciam, Refactored by tex
+//
+// Checks for single tick snaps, which may occur on:
+// - aimlocking onto a target
+// - snapping up/down for auto rocketjump
+// - maybe some other cheats
 
 use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
@@ -10,7 +15,6 @@ use crate::{
     util::{
         helpers::{
             KeyValueVec, ViewAngle,
-            geometry::viewangle_delta,
             player_finders::{players_alive_and_in_pvs, valid_players},
         },
         nocrex::jankguard::JankGuard,
@@ -24,7 +28,9 @@ use tf_demo_parser::ParserState;
 
 #[derive(Default)]
 pub struct AimSnap {
+    /// history of the last 5 ticks
     ticks: Vec<(u32, KeyValueVec<SteamID, ViewAngle>)>,
+    players: KeyValueVec<SteamID, AngleHistory>,
     jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
@@ -40,6 +46,7 @@ pub struct Parameters {
 impl Default for Parameters {
     fn default() -> Self {
         Self {
+            // TODO: check why noise_min is not 0
             noise_min: 0.028,
             noise_max: 0.99,
             snap_threshold: 10.0,
@@ -76,9 +83,10 @@ impl CheatAlgorithm for AimSnap {
         self.ticks.insert(0, (ticknum, Default::default()));
         self.ticks.truncate(5);
 
+        let mut players_to_remove = self.players.keys().to_vec();
+
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
-
             if ticks_since_event < 60 {
                 // Ignore detections +-60 ticks from a teleport or spawn event
                 if ticks_since_event == 0 {
@@ -87,36 +95,18 @@ impl CheatAlgorithm for AimSnap {
                 continue;
             }
 
-            _ = self
-                .ticks
-                .get_mut(0)
-                .context("no first tick in AimSnap")?
-                .1
-                .insert(steam_id, ViewAngle::from(player)); // Store angle for this tick for next ticks
+            if let Some(i) = players_to_remove.iter().enumerate().find(|(_, sid)| **sid == steam_id).map(|(i, _)| i) {
+                players_to_remove.swap_remove(i);
+            }
 
-            let angle_history: Vec<_> = self.ticks.iter().filter_map(|(t, m)| m.get(&steam_id).map(|p| (*t, *p))).rev().collect();
-
-            if angle_history.len() < self.ticks.len() {
+            let angle_history = self.players.get_mut_or_insert_default(steam_id);
+            let Some(delta_magnitudes) = angle_history.push(ViewAngle::from(player)) else {
                 continue;
-            }
+            };
 
-            let mut deltas = Vec::new();
-            for window in angle_history.windows(2) {
-                let (t1, angle1) = window[0];
-                let (t2, angle2) = window[1];
-
-                let tick_delta = t2.saturating_sub(t1);
-
-                let (va_delta_real, pa_delta_real) = viewangle_delta(angle2, angle1, tick_delta);
-
-                let mag_delta = (va_delta_real * va_delta_real + pa_delta_real * pa_delta_real).sqrt();
-                deltas.push(mag_delta);
-            }
-
-            if noise_range.contains(deltas.first().context("no first delta in AimSnap")?)
-                && noise_range.contains(deltas.last().context("no last delta in AimSnap")?)
-                && deltas.iter().filter(|&d| noise_range.contains(d)).count() == deltas.len() - 1
-                && deltas.iter().filter(|&&d| d > snap_threshold).count() == 1
+            if noise_range.contains(&delta_magnitudes[0])
+                && delta_magnitudes[1] > snap_threshold
+                && noise_range.contains(&delta_magnitudes[2])
                 && self.jg.fired(&steam_id, ticknum) < 5
             {
                 self.detections.push(Detection {
@@ -124,12 +114,19 @@ impl CheatAlgorithm for AimSnap {
                     algorithm: self.algorithm_name().to_string(),
                     player: steam_id,
                     data: json!({
-                        "deltas": deltas
+                        "deltas": delta_magnitudes
                     }),
                 });
             }
         }
-        Ok(vec![])
+
+        players_to_remove.iter().for_each(|sid| _ = self.players.remove(sid));
+
+        let detections_to_return = self.detections.iter().filter(|d| d.tick + 60 < ticknum).cloned().collect();
+
+        self.detections.retain(|d| d.tick + 60 < ticknum);
+
+        Ok(detections_to_return)
     }
 
     fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
@@ -155,4 +152,42 @@ impl CheatAlgorithm for AimSnap {
         let params = make_algorithm_params!(self.params; [noise_min, noise_max, snap_threshold]);
         Some(params)
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum AngleHistory {
+    #[default]
+    None,
+    One([ViewAngle; 1]),
+    Two([ViewAngle; 2]),
+    Three([ViewAngle; 3]),
+    Four([ViewAngle; 4]),
+}
+
+impl AngleHistory {
+    pub fn push(&mut self, view_angle: ViewAngle) -> Option<[f32; 3]> {
+        let (new_self, delta_magnitudes) = match *self {
+            Self::None => (Self::One([view_angle]), None),
+            Self::One([v1]) => (Self::Two([v1, view_angle]), None),
+            Self::Two([v1, v2]) => (Self::Three([v1, v2, view_angle]), None),
+            Self::Three([v1, v2, v3]) => {
+                let viewangles = [v1, v2, v3, view_angle];
+                (Self::Four(viewangles), Some(viewangles_to_magnitudes(viewangles)))
+            }
+            Self::Four([_, v1, v2, v3]) => {
+                let viewangles = [v1, v2, v3, view_angle];
+                (Self::Four(viewangles), Some(viewangles_to_magnitudes(viewangles)))
+            }
+        };
+        *self = new_self;
+        delta_magnitudes
+    }
+}
+
+fn viewangles_to_magnitudes(viewangles: [ViewAngle; 4]) -> [f32; 3] {
+    [
+        viewangles[0].viewangle_delta(viewangles[1]).magnitude(),
+        viewangles[1].viewangle_delta(viewangles[2]).magnitude(),
+        viewangles[2].viewangle_delta(viewangles[3]).magnitude(),
+    ]
 }

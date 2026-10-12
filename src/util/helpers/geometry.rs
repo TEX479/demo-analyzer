@@ -45,6 +45,7 @@ pub static F32_EPSILON: f32 = 0.00001;
 ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
 /// }
 /// ```
+// TODO: move to `ViewAngle`s & maybe remove `tick_delta` parameter
 pub fn viewangle_delta(current_angle: ViewAngle, previous_angle: ViewAngle, tick_delta: u32) -> (f32, f32) {
     let tick_delta = tick_delta.max(1);
     let va_delta = {
@@ -60,6 +61,12 @@ pub struct Vec3 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct ViewAngleDelta {
+    pub yaw: f32,
+    pub pitch: f32,
 }
 
 /// a player's view angle
@@ -113,21 +120,71 @@ impl ViewAngle {
         }
     }
 
+    /// Compute the difference in viewangles. We have to account for the fact viewangles are in a circle.
+    /// E.g. If viewangle goes from 350 to 10 degrees, we want to return 20 degrees.
+    ///
+    /// The returned values can be thought of the offset the player had to move their mouse to.
+    ///
+    /// This does *not* equal the angular difference, since when looking up/down, the angular difference decreases compared to the mouse movement
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::{viewangle_delta, ViewAngle, ViewAngleDelta};
+    ///
+    /// let va1 = ViewAngle { yaw: 0.0, pitch: 0.0 };
+    /// let va2 = ViewAngle { yaw: 90.0, pitch: 0.0 };
+    /// let ViewAngleDelta { yaw, pitch } = va1.viewangle_delta(va2);
+    /// assert!(floats_are_equal(yaw, 90.0));
+    /// assert!(floats_are_equal(pitch, 0.0));
+    ///
+    /// let va1 = ViewAngle { yaw: 0.0, pitch: 0.0 };
+    /// let va2 = ViewAngle { yaw: -5.0, pitch: 0.0 };
+    /// let ViewAngleDelta { yaw, pitch } = va1.viewangle_delta(va2);
+    /// assert!(floats_are_equal(yaw, -5.0));
+    /// assert!(floats_are_equal(pitch, 0.0));
+    ///
+    /// // in this case, the actual world angles are very close
+    /// // this demonstrates the difference to `ViewAngle::delta`
+    /// let va1 = ViewAngle { yaw: 0.0, pitch: 85.0 };
+    /// let va2 = ViewAngle { yaw: 90.0, pitch: 89.0 };
+    /// let ViewAngleDelta { yaw, pitch } = va1.viewangle_delta(va2);
+    /// assert!(floats_are_equal(yaw, 90.0));
+    /// assert!(floats_are_equal(pitch, 4.0));
+    ///
+    ///
+    /// // since floating point operations have rounding, compare using some epsilon
+    /// const EPSILON: f32 = 0.001;
+    /// fn floats_are_equal(f1: f32, f2: f32) -> bool {
+    ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
+    /// }
+    /// ```    
+    pub fn viewangle_delta(self, next: Self) -> ViewAngleDelta {
+        let yaw = {
+            let diff = (next.yaw - self.yaw).rem_euclid(360.0);
+            if diff > 180.0 { diff - 360.0 } else { diff }
+        };
+        let pitch = next.pitch - self.pitch;
+        ViewAngleDelta { yaw, pitch }
+    }
+
     /// Compute the total angular difference between two angles in degrees
+    ///
+    /// This computes the actual in-world difference angle,
+    /// meaning that having a pitch of 90° and changing yaw does not affect the delta output.
     ///
     /// # Example
     /// ```
     /// # use analysis_template::util::helpers::geometry::ViewAngle;
     /// let x = ViewAngle { yaw: 0.0, pitch: 0.0 };
     /// let y = ViewAngle { yaw: 90.0, pitch: 27.3 };
-    /// let delta = x.delta(y);
+    /// let delta = x.world_angle_delta(y);
     /// let expected_delta = 90.0;
     /// assert!(floats_are_equal(delta, expected_delta));
     ///
     ///
     /// let x = ViewAngle { yaw: 0.0, pitch: 85.0 };
     /// let y = ViewAngle { yaw: 90.0, pitch: 85.0 };
-    /// let delta = x.delta(y);
+    /// let delta = x.world_angle_delta(y);
     /// let expected_delta = 7.0665;
     /// println!("delta: {}", delta);
     /// assert!(floats_are_equal(delta, expected_delta));
@@ -139,7 +196,7 @@ impl ViewAngle {
     ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
     /// }
     /// ```
-    pub fn delta(self, other: Self) -> f32 {
+    pub fn world_angle_delta(self, other: Self) -> f32 {
         let vec1 = self.to_unit_vec();
         let vec2 = other.to_unit_vec();
 
@@ -343,6 +400,81 @@ impl Vec3 {
     }
 }
 
+impl ViewAngleDelta {
+    /// returns the magnitude of the delta
+    ///
+    /// If you need the square of the delta, use `ViewAngleDelta::magnitude_squared`, as this method takes it's squareroot
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::ViewAngleDelta;
+    ///
+    /// let x = ViewAngleDelta { yaw: 1.0, pitch: 0.0 };
+    /// let length = x.magnitude();
+    /// let expected_length = 1.0;
+    /// assert!(floats_are_equal(length, expected_length));
+    ///
+    /// let x = ViewAngleDelta { yaw: 3.0, pitch: 4.0 };
+    /// let length = x.magnitude();
+    /// let expected_length = 5.0;
+    /// assert!(floats_are_equal(length, expected_length));
+    ///
+    ///
+    /// // since floating point operations have rounding, compare using some epsilon
+    /// const EPSILON: f32 = 0.001;
+    /// fn floats_are_equal(f1: f32, f2: f32) -> bool {
+    ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
+    /// }
+    /// ```
+    pub fn magnitude(self) -> f32 {
+        self.magnitude_squared().sqrt()
+    }
+
+    /// returns the square of the magnitude of the vector
+    ///
+    /// This is faster than `ViewAngleDelta::magnitude()`, since it does not take the squareroot.
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::ViewAngleDelta;
+    /// let x = ViewAngleDelta { yaw: 1.0, pitch: 0.0 };
+    /// let length = x.magnitude_squared();
+    /// let expected_length = 1.0;
+    /// assert!(floats_are_equal(length, expected_length));
+    ///
+    ///
+    /// let x = ViewAngleDelta { yaw: 3.0, pitch: 4.0 };
+    /// let length = x.magnitude_squared();
+    /// let expected_length = 25.0;
+    /// assert!(floats_are_equal(length, expected_length));
+    ///
+    ///
+    /// // since floating point operations have rounding, compare using some epsilon
+    /// const EPSILON: f32 = 0.001;
+    /// fn floats_are_equal(f1: f32, f2: f32) -> bool {
+    ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
+    /// }
+    /// ```
+    pub const fn magnitude_squared(self) -> f32 {
+        self.yaw * self.yaw + self.pitch * self.pitch
+    }
+
+    /// checks if a field of self is NaN
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::ViewAngleDelta;
+    /// assert!(!ViewAngleDelta { yaw: 0.0, pitch: 0.0 }.is_nan());
+    /// assert!(ViewAngleDelta { yaw: f32::NAN, pitch: 0.0 }.is_nan());
+    /// assert!(ViewAngleDelta { yaw: 0.0, pitch: f32::NAN }.is_nan());
+    /// assert!(ViewAngleDelta { yaw: f32::NAN, pitch: f32::NAN }.is_nan());
+    /// ```
+    pub fn is_nan(&self) -> bool {
+        self.yaw.is_nan() || self.pitch.is_nan()
+    }
+}
+
+// TODO: add unit tests for Vec3 & ViewAngleDelta arithmetic
 impl Add for Vec3 {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {

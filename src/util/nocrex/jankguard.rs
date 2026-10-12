@@ -1,6 +1,9 @@
 // Written by Nocrex
 
-use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
+use crate::{
+    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
+    util::helpers::player_finders::{players_alive_and_in_pvs, valid_players},
+};
 use anyhow::Context;
 use std::collections::HashMap;
 use steamid_ng::SteamID;
@@ -96,20 +99,11 @@ impl JankGuard {
         }
     }
 
+    /// performs the JankGuard on_tick logic
     pub fn on_tick(&mut self, state: &CheatAnalyserState) -> anyhow::Result<()> {
+        // NOTE: never errors, thus maybe remove the result?
         let mut states = HashMap::new();
-        for player in state
-            .players
-            .iter()
-            .filter(|p| p.in_pvs && p.state == PlayerState::Alive && p.info.as_ref().is_some_and(|info| info.steam_id != "BOT"))
-        {
-            let info = match &player.info {
-                Some(info) => info,
-                None => continue,
-            };
-
-            let steam_id = SteamID::from_steam3(&info.steam_id).context(format!("invalid steam_id3: {:?}", info.steam_id))?;
-
+        for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
             let player_data = self.player_data.entry(steam_id).or_default();
             let prev_player = player_data.prev_state.as_ref();
 

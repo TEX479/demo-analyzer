@@ -13,6 +13,13 @@ use steamid_ng::SteamID;
 use tf_demo_parser::Demo;
 
 fn main() -> eframe::Result {
+    tracing_subscriber::fmt()
+        .with_ansi(true)
+        .with_level(true)
+        // .with_file(true)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([600.0, 800.0]).with_drag_and_drop(true),
         ..Default::default()

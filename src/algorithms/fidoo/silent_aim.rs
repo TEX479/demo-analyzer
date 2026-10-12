@@ -489,7 +489,7 @@ impl CheatAlgorithm for SilentAim {
                 }
 
                 // Return delta between current angle (t) and anchor angle (t - i)
-                let delta_0_i = current_angle.delta(anchor_angle);
+                let delta_0_i = current_angle.world_angle_delta(anchor_angle);
 
                 // Check exact angle match (zero drift or within float quantization epsilon)
                 let is_exact = delta_0_i <= exact_match_epsilon || (curr_snap.angle == anchor_snap.angle);
@@ -516,8 +516,8 @@ impl CheatAlgorithm for SilentAim {
                 {
                     let mid_angle = mid_snap.angle;
 
-                    let mid_delta_curr = current_angle.delta(mid_angle);
-                    let mid_delta_anchor = anchor_angle.delta(mid_angle);
+                    let mid_delta_curr = current_angle.world_angle_delta(mid_angle);
+                    let mid_delta_anchor = anchor_angle.world_angle_delta(mid_angle);
                     let peak_delta = mid_delta_curr.max(mid_delta_anchor);
 
                     if peak_delta < min_delta_second_third {

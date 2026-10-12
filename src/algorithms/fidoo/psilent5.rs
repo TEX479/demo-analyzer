@@ -443,7 +443,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
 
     // Continuous Yaw Compensation & Convergence Evaluation
     for (tick, pos, view) in test_views {
-        let current_raw = view.delta(launch_angles);
+        let current_raw = view.world_angle_delta(launch_angles);
         if current_raw < raw_delta {
             raw_delta = current_raw;
         }
@@ -476,7 +476,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                     v_view
                 };
                 let direct_angles = vector_angles(expected_direct);
-                let direct_delta = direct_angles.delta(launch_angles);
+                let direct_delta = direct_angles.world_angle_delta(launch_angles);
                 if direct_delta < compensated_delta {
                     compensated_delta = direct_delta;
                     best_view = view;
@@ -508,7 +508,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                                 }
                             }
                             let expected_angles = vector_angles(expected_dir);
-                            let delta = launch_angles.delta(expected_angles);
+                            let delta = launch_angles.world_angle_delta(expected_angles);
                             if delta < compensated_delta {
                                 compensated_delta = delta;
                                 best_view = view;
@@ -540,7 +540,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                                 }
                             }
                             let expected_angles = vector_angles(expected_dir);
-                            let delta = launch_angles.delta(expected_angles);
+                            let delta = launch_angles.world_angle_delta(expected_angles);
                             if delta < compensated_delta {
                                 compensated_delta = delta;
                                 best_view = view;
@@ -570,7 +570,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                             }
                         }
                         let expected_angles = vector_angles(expected_dir);
-                        let delta = launch_angles.delta(expected_angles);
+                        let delta = launch_angles.world_angle_delta(expected_angles);
                         if delta < compensated_delta {
                             compensated_delta = delta;
                             best_view = view;

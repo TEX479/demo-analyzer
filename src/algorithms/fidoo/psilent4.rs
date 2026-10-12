@@ -472,11 +472,11 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
     let is_downward_shot = candidate.launch_direction.z < -0.35;
 
     for (tick, pos, view) in test_views {
-        raw_delta = raw_delta.min(view.delta(launch_angles));
+        raw_delta = raw_delta.min(view.world_angle_delta(launch_angles));
 
         for eye_height in EYE_HEIGHTS {
             if let Some(opt_angles) = optimal_muzzle_compensation(candidate.origin, candidate.launch_direction, pos, eye_height, view) {
-                let delta = view.delta(opt_angles);
+                let delta = view.world_angle_delta(opt_angles);
                 if delta < compensated_delta {
                     compensated_delta = delta;
                     best_view = view;
@@ -508,7 +508,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                                 && let Some(ground_dir) = normalized(impact - eye)
                             {
                                 let ground_angles = vector_angles(ground_dir);
-                                let delta = view.delta(ground_angles);
+                                let delta = view.world_angle_delta(ground_angles);
                                 if delta < compensated_delta {
                                     compensated_delta = delta;
                                     best_view = view;
@@ -524,7 +524,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                 let Some(compensated_angles) = compensate_muzzle_offset(candidate.origin, candidate.launch_direction, pos, eye_height, aim_distance) else {
                     continue;
                 };
-                let delta = view.delta(compensated_angles);
+                let delta = view.world_angle_delta(compensated_angles);
                 if delta < compensated_delta {
                     compensated_delta = delta;
                     best_view = view;
@@ -540,7 +540,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                 };
                 if let Some(dir) = normalized(target - candidate.origin) {
                     let expected_angles = vector_angles(dir);
-                    let delta = launch_angles.delta(expected_angles);
+                    let delta = launch_angles.world_angle_delta(expected_angles);
                     if delta < compensated_delta {
                         compensated_delta = delta;
                         best_view = view;
