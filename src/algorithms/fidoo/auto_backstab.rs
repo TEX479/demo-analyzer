@@ -91,7 +91,6 @@ struct BackstabRecord {
 #[derive(Default)]
 pub struct AutoBackstab {
     params: Parameters,
-    jg: JankGuard,
     spy_states: HashMap<SteamID, SpyBackstabTracker>,
     knife_entities: HashMap<EntityId, KnifeInfo>,
     player_histories: HashMap<SteamID, VecDeque<PlayerSnapshot>>,
@@ -369,14 +368,7 @@ impl CheatAlgorithm for AutoBackstab {
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
-        let mut types = self.jg.handled_messages()?;
-        if !types.contains(&MessageType::PacketEntities) {
-            types.push(MessageType::PacketEntities);
-        }
-        if !types.contains(&MessageType::GameEvent) {
-            types.push(MessageType::GameEvent);
-        }
-        Ok(types)
+        Ok(vec![MessageType::PacketEntities, MessageType::GameEvent])
     }
 
     fn on_message(
@@ -384,9 +376,9 @@ impl CheatAlgorithm for AutoBackstab {
         message: &Message,
         state: &CheatAnalyserState,
         parser_state: &ParserState,
+        _jg: &JankGuard,
         tick: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
         let ticknum = u32::from(tick);
         let mut new_detections = Vec::new();
 
@@ -686,8 +678,7 @@ impl CheatAlgorithm for AutoBackstab {
         Ok(new_detections)
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state)?;
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jankguard: &JankGuard) -> Result<Vec<Detection>, Error> {
         self.record_player_snapshots(state);
         let ticknum = u32::from(state.tick);
 
@@ -709,7 +700,7 @@ impl CheatAlgorithm for AutoBackstab {
                 }
             }
 
-            if self.jg.fired(&sid, ticknum) == 0 {
+            if jankguard.fired(&sid, ticknum) == 0 {
                 let tracker = self.spy_states.entry(sid).or_default();
                 tracker.record_attack(ticknum);
             }
@@ -831,10 +822,6 @@ mod tests {
             cond_ex2: 0,
             invis_change_complete_time: 0.0,
             flags: 1,
-
-            last_spawn: 0,
-            last_fire: 0,
-            last_teleport: 0,
         }
     }
 
@@ -849,6 +836,7 @@ mod tests {
     #[test]
     fn test_instant_triggerbot_without_tracking() {
         let mut algo = AutoBackstab::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
 
         let spy_steam = "[U:1:12345678]";
@@ -885,7 +873,8 @@ mod tests {
 
         let msg = create_hurt_message(hurt_event);
 
-        let detections = algo.on_message(&msg, &state, &parser_state, 24530.into()).unwrap();
+        jg.on_message(&msg, &state, &parser_state, 24530.into());
+        let detections = algo.on_message(&msg, &state, &parser_state, &jg, 24530.into()).unwrap();
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].algorithm, "fidoo/auto_backstab");
         assert_eq!(detections[0].player, spy_sid);
@@ -896,6 +885,7 @@ mod tests {
     #[test]
     fn test_predictable_stalk_approach_no_detection() {
         let mut algo = AutoBackstab::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
 
         let spy_steam = "[U:1:12345678]";
@@ -919,7 +909,8 @@ mod tests {
             state.set_userid_to_id64(UserId::from(1u16), spy_sid);
             state.set_userid_to_id64(UserId::from(6u16), pyro_sid);
 
-            algo.on_tick(&state, &parser_state).unwrap();
+            jg.on_tick(&state).unwrap();
+            algo.on_tick(&state, &parser_state, &jg).unwrap();
         }
 
         algo.update_spy_ready_state(spy_sid, true, 19311);
@@ -940,13 +931,15 @@ mod tests {
 
         let msg = create_hurt_message(hurt_event);
 
-        let detections = algo.on_message(&msg, &state, &parser_state, 19311.into()).unwrap();
+        jg.on_message(&msg, &state, &parser_state, 19311.into());
+        let detections = algo.on_message(&msg, &state, &parser_state, &jg, 19311.into()).unwrap();
         assert_eq!(detections.len(), 0);
     }
 
     #[test]
     fn test_preswing_exclusion() {
         let mut algo = AutoBackstab::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
 
         let spy_steam = "[U:1:12345678]";
@@ -986,13 +979,15 @@ mod tests {
 
         let msg = create_hurt_message(hurt_event);
 
-        let detections = algo.on_message(&msg, &state, &parser_state, 24529.into()).unwrap();
+        jg.on_message(&msg, &state, &parser_state, 24529.into());
+        let detections = algo.on_message(&msg, &state, &parser_state, &jg, 24529.into()).unwrap();
         assert_eq!(detections.len(), 0);
     }
 
     #[test]
     fn test_human_reaction_no_instant_detection() {
         let mut algo = AutoBackstab::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
 
         let spy_steam = "[U:1:12345678]";
@@ -1031,7 +1026,8 @@ mod tests {
 
         let msg = create_hurt_message(hurt_event);
 
-        let detections = algo.on_message(&msg, &state, &parser_state, 24512.into()).unwrap();
+        jg.on_message(&msg, &state, &parser_state, 24512.into());
+        let detections = algo.on_message(&msg, &state, &parser_state, &jg, 24512.into()).unwrap();
         assert_eq!(detections.len(), 0);
 
         let finish_detections = algo.finish().unwrap();
@@ -1041,6 +1037,7 @@ mod tests {
     #[test]
     fn test_teleport_distance_detection() {
         let mut algo = AutoBackstab::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
 
         let spy_steam = "[U:1:12345678]";
@@ -1075,7 +1072,8 @@ mod tests {
 
         let msg = create_hurt_message(hurt_event);
 
-        let detections = algo.on_message(&msg, &state, &parser_state, 1000.into()).unwrap();
+        jg.on_message(&msg, &state, &parser_state, 1000.into());
+        let detections = algo.on_message(&msg, &state, &parser_state, &jg, 1000.into()).unwrap();
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].player, spy_sid);
     }

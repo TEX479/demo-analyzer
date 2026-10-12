@@ -14,6 +14,7 @@ use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
+use crate::util::nocrex::jankguard::JankGuard;
 use crate::util::schema_equip_regions::{CosmeticInfo, check_cosmetic_conflict, get_cosmetic_info, is_action_item, is_dummy_or_invalid, is_weapon_wearable};
 
 #[derive(Debug, Clone)]
@@ -106,7 +107,14 @@ impl CheatAlgorithm for InvalidEquipRegion {
         ])
     }
 
-    fn on_message(&mut self, message: &Message, state: &CheatAnalyserState, pstate: &ParserState, tick: DemoTick) -> Result<Vec<Detection>, Error> {
+    fn on_message(
+        &mut self,
+        message: &Message,
+        state: &CheatAnalyserState,
+        pstate: &ParserState,
+        _jg: &JankGuard,
+        tick: DemoTick,
+    ) -> Result<Vec<Detection>, Error> {
         self.current_tick = u32::from(tick);
 
         match message {
@@ -438,6 +446,9 @@ mod tests {
         algo.server_name = "UGC.TF | Trade #11 | FREE ITEMS!".to_string();
         algo.params.valve_servers_only = true;
 
+        // since jankguard is not used, it does not need to be mutated
+        let jg = JankGuard::default();
+
         let state = CheatAnalyserState::default();
         let pstate = ParserState::new(24, |_| false, false);
         let msg = Message::NetTick(NetTickMessage {
@@ -446,7 +457,7 @@ mod tests {
             std_dev: 0,
         });
 
-        let res = algo.on_message(&msg, &state, &pstate, DemoTick::from(100)).unwrap();
+        let res = algo.on_message(&msg, &state, &pstate, &jg, DemoTick::from(100)).unwrap();
         assert!(res.is_empty(), "Community server should be skipped when valve_servers_only is true");
     }
 
@@ -463,6 +474,9 @@ mod tests {
             ..Default::default()
         };
         algo.server_name = "UGC.TF | Trade #11 | FREE ITEMS!".to_string();
+
+        // since jankguard is not used, it does not need to be mutated
+        let jg = JankGuard::default();
 
         let player_ent = EntityId::from(10u32);
         let mut state = CheatAnalyserState::default();
@@ -509,7 +523,7 @@ mod tests {
             std_dev: 0,
         });
 
-        let res = algo.on_message(&msg, &state, &pstate, DemoTick::from(1)).unwrap();
+        let res = algo.on_message(&msg, &state, &pstate, &jg, DemoTick::from(1)).unwrap();
         assert_eq!(res.len(), 1, "Community server should flag when valve_servers_only is false");
         assert_eq!(res[0].data["valve_server"], false);
         assert_eq!(res[0].data["server_name"], "UGC.TF | Trade #11 | FREE ITEMS!");
@@ -529,6 +543,9 @@ mod tests {
         };
         algo.server_name = "Valve Matchmaking Server (Stockholm srcds2015-sto1 #69)".to_string();
 
+        // since jankguard is not used, it does not need to be mutated
+        let jg = JankGuard::default();
+
         let player_ent = EntityId::from(10u32);
         let mut state = CheatAnalyserState::default();
         let mut p = Player {
@@ -574,7 +591,7 @@ mod tests {
             std_dev: 0,
         });
 
-        let res = algo.on_message(&msg, &state, &pstate, DemoTick::from(1)).unwrap();
+        let res = algo.on_message(&msg, &state, &pstate, &jg, DemoTick::from(1)).unwrap();
         assert_eq!(res.len(), 1, "Valve server should flag when valve_servers_only is true");
         assert_eq!(res[0].data["valve_server"], true);
         assert_eq!(res[0].data["server_name"], "Valve Matchmaking Server (Stockholm srcds2015-sto1 #69)");
@@ -585,6 +602,9 @@ mod tests {
         let mut algo = InvalidEquipRegion::new();
         algo.server_name = "Valve Matchmaking Server (test)".to_string();
         algo.params.min_persistence_ticks = 1;
+
+        // since jankguard is not used, it does not need to be mutated
+        let jg = JankGuard::default();
 
         let player_ent = EntityId::from(13u32);
         let steam_id64 = 76561199232172054u64; // account_id = 1271906326
@@ -637,7 +657,7 @@ mod tests {
             std_dev: 0,
         });
 
-        let res = algo.on_message(&msg, &state, &pstate, DemoTick::from(1)).unwrap();
+        let res = algo.on_message(&msg, &state, &pstate, &jg, DemoTick::from(1)).unwrap();
         assert!(
             res.is_empty(),
             "Orphaned wearable with mismatching account_id must be ignored and not cause conflict"

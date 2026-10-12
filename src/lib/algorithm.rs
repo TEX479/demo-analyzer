@@ -12,7 +12,10 @@ pub use crate::algorithms::{
     write_to_file::WriteToFile,
 };
 
-use crate::{algorithms::tex::info_logger::Logger, base::cheat_analyser_base::CheatAnalyserState, lib::parameters::AlgorithmParameters};
+use crate::{
+    algorithms::tex::info_logger::Logger, base::cheat_analyser_base::CheatAnalyserState, lib::parameters::AlgorithmParameters,
+    util::nocrex::jankguard::JankGuard,
+};
 use anyhow::Error;
 use bitbuffer::BitRead;
 use serde::{Deserialize, Serialize};
@@ -116,7 +119,7 @@ pub trait CheatAlgorithm {
     // Called for each tick. Passes the basic game state for the tick
     // Try the write_to_file algorithm to see what those states look like (there is one state per line)
     // cargo run -- -i demo.dem -a write_to_file
-    fn on_tick(&mut self, _state: &CheatAnalyserState, _parser_state: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, _state: &CheatAnalyserState, _parser_state: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         // TODO: remove result if algos can not fail
         Ok(vec![])
     }
@@ -129,7 +132,14 @@ pub trait CheatAlgorithm {
 
     // Called for each message received by the parser.
     // Only called for types specified in handled_messages.
-    fn on_message(&mut self, _message: &Message, _state: &CheatAnalyserState, _parser_state: &ParserState, _tick: DemoTick) -> Result<Vec<Detection>, Error> {
+    fn on_message(
+        &mut self,
+        _message: &Message,
+        _state: &CheatAnalyserState,
+        _parser_state: &ParserState,
+        _jankguard: &JankGuard,
+        _tick: DemoTick,
+    ) -> Result<Vec<Detection>, Error> {
         Ok(vec![])
     }
 

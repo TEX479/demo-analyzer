@@ -22,7 +22,7 @@ use crate::{
         nocrex::jankguard::JankGuard,
     },
 };
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use std::ops::Range;
 use steamid_ng::SteamID;
@@ -32,7 +32,6 @@ use tf_demo_parser::ParserState;
 pub struct AimSnap {
     /// history of the last 5 ticks
     players: KeyValueVec<SteamID, AngleHistory>,
-    jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
 }
@@ -70,8 +69,7 @@ impl CheatAlgorithm for AimSnap {
         "nocrex/aimsnap"
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state).context(format!("jankguard errored in on_tick with state {:?}", state))?;
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
@@ -84,7 +82,7 @@ impl CheatAlgorithm for AimSnap {
         let mut players_to_remove = self.players.keys().to_vec();
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
-            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
             if ticks_since_event < 60 {
                 // Ignore detections +-60 ticks from a teleport or spawn event
                 if ticks_since_event == 0 {
@@ -105,7 +103,7 @@ impl CheatAlgorithm for AimSnap {
             if noise_range.contains(&delta_magnitudes[0])
                 && delta_magnitudes[1] > snap_threshold
                 && noise_range.contains(&delta_magnitudes[2])
-                && self.jg.fired(&steam_id, ticknum) < 5
+                && jg.fired(&steam_id, ticknum) < 5
             {
                 self.detections.push(Detection {
                     tick: ticknum - 2,
@@ -127,23 +125,8 @@ impl CheatAlgorithm for AimSnap {
         Ok(detections_to_return)
     }
 
-    fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
-        self.jg.handled_messages()
-    }
-
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
         Ok(self.detections.clone())
-    }
-
-    fn on_message(
-        &mut self,
-        message: &tf_demo_parser::demo::message::Message,
-        state: &CheatAnalyserState,
-        parser_state: &ParserState,
-        tick: tf_demo_parser::demo::data::DemoTick,
-    ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
-        Ok(vec![])
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {

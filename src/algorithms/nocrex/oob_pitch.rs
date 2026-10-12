@@ -7,7 +7,10 @@ use crate::{
         parameters::AlgorithmParameters,
     },
     make_algorithm_params,
-    util::helpers::player_finders::{players_alive_and_in_pvs, valid_players},
+    util::{
+        helpers::player_finders::{players_alive_and_in_pvs, valid_players},
+        nocrex::jankguard::JankGuard,
+    },
 };
 use anyhow::Error;
 use serde_json::json;
@@ -61,6 +64,7 @@ impl CheatAlgorithm for OOBPitch {
         message: &Message,
         state: &CheatAnalyserState,
         _: &ParserState,
+        _: &JankGuard,
         _: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
         let mut submitted_detections = Vec::new();

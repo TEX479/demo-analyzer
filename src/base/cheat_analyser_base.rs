@@ -35,6 +35,7 @@ use web_time::Instant;
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::util::helpers::{Vec3, ViewAngle};
+use crate::util::nocrex::jankguard::JankGuard;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum PlayerState {
@@ -77,7 +78,15 @@ pub struct Player {
     pub cond_ex2: u32,
     pub invis_change_complete_time: f32,
     pub flags: u32,
-    // pub shot_fired: u32,
+    /*
+    // TODO: parse the following 3 on_message instead of having jankguard as part of the analysis base
+    /// tick when this player last spawned
+    pub last_spawn: u32,
+    /// tick when this player last used a teleporter
+    pub last_teleport: u32,
+    /// tick when this player last fired
+    pub last_fire: u32,
+    // */
 }
 
 impl Player {
@@ -489,6 +498,8 @@ pub struct CheatAnalyser {
     last_progress_update_time: Instant,
     progress: Vec<u32>,
     class_names: Vec<ServerClassName>, // indexed by ClassId
+
+    jankguard: JankGuard,
 }
 
 impl Default for CheatAnalyser {
@@ -502,6 +513,7 @@ impl Default for CheatAnalyser {
             last_progress_update_time: Instant::now(),
             progress: Default::default(),
             class_names: Default::default(),
+            jankguard: Default::default(),
         }
     }
 }
@@ -533,8 +545,11 @@ impl MessageHandler for CheatAnalyser {
             Message::NetTick(_) => {
                 // TODO: figure out something that works for live analysis
                 self.check_progress();
+                if let Err(e) = self.jankguard.on_tick(&self.state) {
+                    tracing::error!("{:?}", e);
+                };
                 for algorithm in &mut self.algorithms {
-                    if let Ok(detections) = algorithm.on_tick(&self.state, parser_state) {
+                    if let Ok(detections) = algorithm.on_tick(&self.state, parser_state, &self.jankguard) {
                         self.detections.extend(detections)
                     }
                 }
@@ -583,11 +598,12 @@ impl MessageHandler for CheatAnalyser {
             },
             _ => {}
         }
+        self.jankguard.on_message(message, &self.state, parser_state, _tick);
         for algorithm in &mut self.algorithms {
             if !algorithm.does_handle(message.get_message_type()) {
                 continue;
             }
-            if let Ok(detections) = algorithm.on_message(message, &self.state, parser_state, _tick) {
+            if let Ok(detections) = algorithm.on_message(message, &self.state, parser_state, &self.jankguard, _tick) {
                 self.detections.extend(detections)
             }
         }
@@ -653,14 +669,8 @@ impl CheatAnalyser {
         }
 
         Self {
-            state: Default::default(),
             algorithms,
-            detections: Vec::new(),
-            header: None,
-            tick: DemoTick::default(),
-            last_progress_update_time: Instant::now(),
-            progress: vec![],
-            class_names: Vec::new(),
+            ..Default::default()
         }
     }
 

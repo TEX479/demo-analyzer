@@ -1,4 +1,5 @@
 use crate::make_algorithm_params;
+use crate::util::nocrex::jankguard::JankGuard;
 use crate::{lib::algorithm::CheatAlgorithm, util::helpers::KeyValueVec};
 use itertools::Itertools;
 use steamid_ng::SteamID;
@@ -51,6 +52,7 @@ impl CheatAlgorithm for Logger {
         message: &tf_demo_parser::demo::message::Message,
         state: &crate::base::cheat_analyser_base::CheatAnalyserState,
         _parser_state: &tf_demo_parser::ParserState,
+        _jg: &JankGuard,
         _tick: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<crate::lib::algorithm::Detection>, anyhow::Error> {
         if let Message::GameEvent(GameEventMessage {

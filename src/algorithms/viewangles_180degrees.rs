@@ -1,9 +1,12 @@
 use crate::{
     base::cheat_analyser_base::CheatAnalyserState,
     lib::algorithm::{CheatAlgorithm, Detection},
-    util::helpers::{
-        KeyValueVec, ViewAngle,
-        player_finders::{players_alive_and_in_pvs, valid_players},
+    util::{
+        helpers::{
+            KeyValueVec, ViewAngle,
+            player_finders::{players_alive_and_in_pvs, valid_players},
+        },
+        nocrex::jankguard::JankGuard,
     },
 };
 use anyhow::Error;
@@ -47,7 +50,7 @@ impl CheatAlgorithm for ViewAngles180Degrees {
         "viewangles_180degrees"
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
         let tick_delta = ticknum - self.previous_tick;
         let mut new_player_history = KeyValueVec::new();

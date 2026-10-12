@@ -4,6 +4,7 @@ use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::player_with_sid;
+use crate::util::nocrex::jankguard::JankGuard;
 use anyhow::Error;
 use serde_json::{Map, Value};
 use tf_demo_parser::ParserState;
@@ -56,7 +57,7 @@ impl CheatAlgorithm for BackTrack {
         "teltta/backtrack"
     }
 
-    fn on_tick(&mut self, _: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, _: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         Ok(vec![])
     }
 
@@ -69,6 +70,7 @@ impl CheatAlgorithm for BackTrack {
         message: &tf_demo_parser::demo::message::Message,
         state: &CheatAnalyserState,
         _: &ParserState,
+        _: &JankGuard,
         tick: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
         let mut detections = Vec::new();

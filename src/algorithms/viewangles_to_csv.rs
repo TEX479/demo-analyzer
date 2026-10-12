@@ -7,6 +7,7 @@ use crate::base::cheat_analyser_base::{CheatAnalyserState, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::util::helpers::geometry::{ViewAngle, ViewAngleDelta};
+use crate::util::nocrex::jankguard::JankGuard;
 use crate::{dev_print, make_algorithm_params};
 use anyhow::{Context, Error};
 use tf_demo_parser::ParserState;
@@ -106,7 +107,7 @@ impl CheatAlgorithm for ViewAnglesToCSV {
         .context("could not write header to output file")
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 

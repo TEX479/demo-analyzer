@@ -14,6 +14,7 @@ use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::{Vec3, ViewAngle, handle_to_entid};
+use crate::util::nocrex::jankguard::JankGuard;
 
 const HISTORY_TICKS: u32 = 40;
 const TELEPORT_THRESHOLD: f32 = 400.0;
@@ -194,7 +195,7 @@ impl CheatAlgorithm for Psilent5 {
         Ok(vec![MessageType::PacketEntities])
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         self.record_state(state);
         let resolved = self.resolve_pending(state.tick.into(), false);
         self.tentative.extend(resolved);
@@ -206,6 +207,7 @@ impl CheatAlgorithm for Psilent5 {
         message: &Message,
         state: &CheatAnalyserState,
         parser_state: &ParserState,
+        _jg: &JankGuard,
         _: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
         let Message::PacketEntities(message) = message else {

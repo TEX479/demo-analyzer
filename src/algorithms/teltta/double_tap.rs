@@ -6,7 +6,10 @@ use crate::{
         parameters::AlgorithmParameters,
     },
     make_algorithm_params,
-    util::helpers::{KeyValueVec, player_finders::player_with_uid},
+    util::{
+        helpers::{KeyValueVec, player_finders::player_with_uid},
+        nocrex::jankguard::JankGuard,
+    },
 };
 use anyhow::Error;
 use serde_json::{Map, Value};
@@ -66,7 +69,7 @@ impl CheatAlgorithm for DoubleTap {
         "teltta/doubletap"
     }
 
-    fn on_tick(&mut self, _: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, _: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         Ok(vec![])
     }
 
@@ -79,6 +82,7 @@ impl CheatAlgorithm for DoubleTap {
         message: &tf_demo_parser::demo::message::Message,
         state: &CheatAnalyserState,
         _: &ParserState,
+        _: &JankGuard,
         tick: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
         let mut detections = Vec::new();

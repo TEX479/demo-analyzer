@@ -11,6 +11,7 @@ use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
+use crate::util::nocrex::jankguard::JankGuard;
 
 // header is not needed for this algorithm, but is included to serve as an example of how to handle the lifetimes.
 #[allow(dead_code)]
@@ -63,7 +64,14 @@ impl CheatAlgorithm for AllMessages {
             .context("could not initialize file `./output/all_messages.txt`")
     }
 
-    fn on_message(&mut self, message: &Message, _: &CheatAnalyserState, pstate: &ParserState, tick: DemoTick) -> Result<Vec<Detection>> {
+    fn on_message(
+        &mut self,
+        message: &Message,
+        _: &CheatAnalyserState,
+        pstate: &ParserState,
+        _jankguard: &JankGuard,
+        tick: DemoTick,
+    ) -> Result<Vec<Detection>> {
         let mut message = format!("({tick}) {:#?}", message);
 
         while let Some(start) = message.find("ClassId(") {

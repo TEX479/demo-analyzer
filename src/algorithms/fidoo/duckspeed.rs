@@ -4,10 +4,8 @@ use std::collections::HashMap;
 use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
-use tf_demo_parser::demo::data::DemoTick;
-use tf_demo_parser::demo::message::Message;
+use tf_demo_parser::ParserState;
 use tf_demo_parser::demo::parser::analyser::Class;
-use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
@@ -34,7 +32,6 @@ struct PlayerCrouchSpeedState {
 pub struct CrouchSpeed {
     params: Parameters,
     player_states: HashMap<SteamID, PlayerCrouchSpeedState>,
-    jg: JankGuard,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -108,23 +105,12 @@ impl CheatAlgorithm for CrouchSpeed {
         Some(params)
     }
 
-    fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
-        self.jg.handled_messages()
-    }
-
     fn init(&mut self) -> Result<(), Error> {
         self.player_states.clear();
-        self.jg = JankGuard::default();
         Ok(())
     }
 
-    fn on_message(&mut self, message: &Message, state: &CheatAnalyserState, parser_state: &ParserState, tick: DemoTick) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
-        Ok(vec![])
-    }
-
-    fn on_tick(&mut self, state: &CheatAnalyserState, _parser_state: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state)?;
+    fn on_tick(&mut self, state: &CheatAnalyserState, _parser_state: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
 
         let min_speed = self.params.min_speed;
@@ -137,7 +123,7 @@ impl CheatAlgorithm for CrouchSpeed {
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
             // Spawn and teleport grace window (60 ticks)
-            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
             if ticks_since_event < 60 {
                 self.player_states.remove(&steam_id);
                 continue;
@@ -268,6 +254,7 @@ impl CheatAlgorithm for CrouchSpeed {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::base::cheat_analyser_base::Player;
@@ -298,6 +285,7 @@ mod tests {
     fn test_clean_c_tap_does_not_flag() {
         // C-tap: Soldier is running on ground, ducks for 2 ticks, then jumps into air
         let mut algo = CrouchSpeed::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
         let parser_state = ParserState::new(1, |_| true, false);
 
@@ -310,7 +298,8 @@ mod tests {
             state.tick = t.into();
             player.position.x += 3.6; // 240 HU/s
             state.players = vec![player.clone()];
-            let dets = algo.on_tick(&state, &parser_state).unwrap();
+            jg.on_tick(&state).unwrap();
+            let dets = algo.on_tick(&state, &parser_state, &jg).unwrap();
             assert!(dets.is_empty());
         }
 
@@ -320,7 +309,8 @@ mod tests {
             state.tick = t.into();
             player.position.x += 3.6;
             state.players = vec![player.clone()];
-            let dets = algo.on_tick(&state, &parser_state).unwrap();
+            jg.on_tick(&state).unwrap();
+            let dets = algo.on_tick(&state, &parser_state, &jg).unwrap();
             assert!(dets.is_empty(), "C-tap must not trigger detection!");
         }
 
@@ -331,7 +321,8 @@ mod tests {
             player.position.x += 12.0; // 800 HU/s
             player.position.z += 8.0;
             state.players = vec![player.clone()];
-            let dets = algo.on_tick(&state, &parser_state).unwrap();
+            jg.on_tick(&state).unwrap();
+            let dets = algo.on_tick(&state, &parser_state, &jg).unwrap();
             assert!(dets.is_empty());
         }
     }
@@ -340,6 +331,7 @@ mod tests {
     fn test_normal_crouch_walk_does_not_flag() {
         // Normal crouch walk: Pyro walking at 100 HU/s (below threshold of 180 HU/s)
         let mut algo = CrouchSpeed::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
         let parser_state = ParserState::new(1, |_| true, false);
 
@@ -350,7 +342,8 @@ mod tests {
             state.tick = t.into();
             player.position.x += 1.5; // 100 HU/s (normal crouch)
             state.players = vec![player.clone()];
-            let dets = algo.on_tick(&state, &parser_state).unwrap();
+            jg.on_tick(&state).unwrap();
+            let dets = algo.on_tick(&state, &parser_state, &jg).unwrap();
             assert!(dets.is_empty(), "Legitimate crouch walk must never flag!");
         }
     }
@@ -360,6 +353,7 @@ mod tests {
     fn test_crouchspeed_cheater_triggers_detection() {
         // Cheater with DuckSpeed: Soldier moving at 220 HU/s while crouched on ground for 50 ticks
         let mut algo = CrouchSpeed::new();
+        let mut jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
         let parser_state = ParserState::new(1, |_| true, false);
 
@@ -371,7 +365,8 @@ mod tests {
             state.tick = t.into();
             player.position.x += 3.3; // 220 HU/s (cheater duck speed for soldier)
             state.players = vec![player.clone()];
-            let dets = algo.on_tick(&state, &parser_state).unwrap();
+            jg.on_tick(&state).unwrap();
+            let dets = algo.on_tick(&state, &parser_state, &jg).unwrap();
             if !dets.is_empty() {
                 triggered = true;
                 assert_eq!(dets[0].algorithm, "fidoo/crouchspeed");

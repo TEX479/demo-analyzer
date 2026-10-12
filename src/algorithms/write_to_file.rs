@@ -8,6 +8,7 @@ use crate::base::cheat_analyser_base::CheatAnalyserState;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
+use crate::util::nocrex::jankguard::JankGuard;
 
 #[allow(dead_code)]
 pub struct WriteToFile {
@@ -73,7 +74,7 @@ impl CheatAlgorithm for WriteToFile {
             .context(format!("could not write to {:?}", self.file))
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         self.state_history.push(state.clone());
         if self.state_history.len() > self.write_batch_size {
             self.write_states_to_file().context("could not write states to file")?;

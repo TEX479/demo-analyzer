@@ -16,7 +16,7 @@ use crate::{
         nocrex::jankguard::JankGuard,
     },
 };
-use anyhow::{Context, Error};
+use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::ParserState;
@@ -26,7 +26,6 @@ pub struct AngleRepeat {
     // TODO: replace with custom history struct
     ticks: Vec<(u32, KeyValueVec<SteamID, ViewAngle>)>,
 
-    jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
 }
@@ -63,8 +62,7 @@ impl CheatAlgorithm for AngleRepeat {
         "nocrex/angle_repeat"
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state).context(format!("jankguard errored in on_tick with state {:?}", state))?;
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
@@ -79,7 +77,7 @@ impl CheatAlgorithm for AngleRepeat {
             let prev_data = self.ticks.get(1).and_then(|(t, m)| m.get(&steam_id).map(|a| (*t, *a)));
             let second_prev_data = self.ticks.get(2).and_then(|(t, m)| m.get(&steam_id).map(|a| (*t, *a)));
 
-            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
                 // Ignore detections +-60 ticks from a teleport or spawn event
@@ -108,7 +106,7 @@ impl CheatAlgorithm for AngleRepeat {
 
                 let ratio = first_second_delta / first_third_delta.max(1.0);
 
-                if first_third_delta <= max_first_third_angle_delta && ratio > min_angle_diff_ratio && self.jg.fired(&steam_id, ticknum) < 3 {
+                if first_third_delta <= max_first_third_angle_delta && ratio > min_angle_diff_ratio && jg.fired(&steam_id, ticknum) < 3 {
                     self.detections.push(Detection {
                         tick: ticknum,
                         algorithm: self.algorithm_name().to_string(),
@@ -125,21 +123,6 @@ impl CheatAlgorithm for AngleRepeat {
                 }
             }
         }
-        Ok(vec![])
-    }
-
-    fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
-        self.jg.handled_messages()
-    }
-
-    fn on_message(
-        &mut self,
-        message: &tf_demo_parser::demo::message::Message,
-        state: &CheatAnalyserState,
-        parser_state: &ParserState,
-        tick: tf_demo_parser::demo::data::DemoTick,
-    ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
         Ok(vec![])
     }
 

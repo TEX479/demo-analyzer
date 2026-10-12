@@ -1,17 +1,17 @@
 // Written by Nocrex
 
 use crate::{
-    base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState},
+    base::cheat_analyser_base::{CheatAnalyserState, Player},
     util::helpers::player_finders::{players_alive_and_in_pvs, valid_players},
 };
-use anyhow::Context;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 
 const TELEPORT_DIST: f32 = 256.0;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 struct PlayerData {
     pub last_spawn: u32,
     pub last_teleport: u32,
@@ -20,7 +20,7 @@ struct PlayerData {
     pub prev_state: Option<Player>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct JankGuard {
     // TODO: find a way to replace with faster `KeyValueVec`
     player_data: HashMap<SteamID, PlayerData>,

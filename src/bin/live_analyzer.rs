@@ -2,7 +2,7 @@ use analysis_template::{
     SILENT,
     algorithms::tex::info_logger::Logger,
     lib::{
-        algorithm::{AimSnap, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, SilentAim, ViewAngles180Degrees},
+        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, Psilent5, SilentAim},
         parameters::{Config, try_update_algorithm_params},
     },
     live_analyzer::live_analysis,
@@ -71,22 +71,20 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         // logger for stuff like printing votes
         Box::new(Logger::default()),
         // actual algos:
-        Box::new(ViewAngles180Degrees::default()),
         Box::new(OOBPitch::new()),
         Box::new(AimSnap::new()),
         Box::new(BackTrack::new()),
         Box::new(DoubleTap::new()),
         Box::new(SilentAim::new()),
-        // Box::new(AngleAccelerationAnalyzer::default()),
         Box::new(BunnyHop::new()),
+        Box::new(AngleRepeat::new()),
+        Box::new(AngleHistory::default()),
+        Box::new(Psilent5::default()),
         // TODO: look over, refactor and add:
         // crouchspeed/duckspeed
         // nospread
-        // psilent5
         // invalid_equip_region
-        // PERF: disabled due to performance issues:
-        // Box::new(AngleRepeat::new()),
-        // Box::new(AngleHistory::default()),
+        // autobackstab
     ];
     config_algorithms_desired(&mut algos);
     algos

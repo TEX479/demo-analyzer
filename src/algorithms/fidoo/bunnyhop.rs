@@ -44,7 +44,6 @@ pub struct Parameters {
 #[derive(Debug, Clone, Default)]
 pub struct BunnyHop {
     player_states: HashMap<SteamID, PlayerBhopState>,
-    jg: JankGuard,
     params: Parameters,
     detections: Vec<Detection>,
 }
@@ -80,23 +79,7 @@ impl CheatAlgorithm for BunnyHop {
         Some(params)
     }
 
-    fn handled_messages(&self) -> Result<Vec<tf_demo_parser::MessageType>, bool> {
-        self.jg.handled_messages()
-    }
-
-    fn on_message(
-        &mut self,
-        message: &tf_demo_parser::demo::message::Message,
-        state: &CheatAnalyserState,
-        parser_state: &ParserState,
-        tick: tf_demo_parser::demo::data::DemoTick,
-    ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
-        Ok(vec![])
-    }
-
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state)?;
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
         let players = &state.players;
 
@@ -109,7 +92,7 @@ impl CheatAlgorithm for BunnyHop {
         let algo_name = self.algorithm_name().to_string();
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
-            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
 
             // Ignore detections within 60 ticks of spawn or teleport
             if ticks_since_event < 60 {

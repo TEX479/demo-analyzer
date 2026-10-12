@@ -53,6 +53,7 @@ enum WeaponCategory {
 #[derive(Default, Clone)]
 pub struct SilentAim {
     player_states: KeyValueVec<SteamID, PlayerHistoryState>,
+    // TODO: maybe replace with states jankguard
     jg: JankGuard,
     params: Parameters,
 }
@@ -337,6 +338,7 @@ impl CheatAlgorithm for SilentAim {
         message: &tf_demo_parser::demo::message::Message,
         state: &CheatAnalyserState,
         parser_state: &ParserState,
+        _jg: &JankGuard,
         tick: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
         self.jg.on_message(message, state, parser_state, tick);
@@ -352,7 +354,7 @@ impl CheatAlgorithm for SilentAim {
         Ok(vec![])
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
         let algo_name = self.algorithm_name().to_string();
@@ -650,10 +652,6 @@ mod tests {
             cond_ex2: 0,
             invis_change_complete_time: 0.0,
             flags: 1,
-
-            last_spawn: 0,
-            last_fire: 0,
-            last_teleport: 0,
         }
     }
 
@@ -661,6 +659,8 @@ mod tests {
     fn test_exact_match_instant_flag() {
         let mut algo = SilentAim::new();
         algo.params.require_fire = false;
+        // since it uses it's own jankguard, this does not need to be mutated
+        let jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
@@ -680,7 +680,7 @@ mod tests {
                 ViewAngle { yaw: 45.0, pitch: 0.0 },
                 true,
             )];
-            let _ = algo.on_tick(&state, &parser_state);
+            let _ = algo.on_tick(&state, &parser_state, &jg).unwrap();
         }
 
         // Tick 105: Flick to (75.0, 15.0) -> peak delta > 30°
@@ -693,7 +693,7 @@ mod tests {
             ViewAngle { yaw: 75.0, pitch: 15.0 },
             true,
         )];
-        let _ = algo.on_tick(&state, &parser_state);
+        let _ = algo.on_tick(&state, &parser_state, &jg).unwrap();
 
         // Tick 106: Snap back to EXACT SAME (45.0, 0.0)
         state.tick = 106.into();
@@ -705,7 +705,7 @@ mod tests {
             ViewAngle { yaw: 45.0, pitch: 0.0 },
             true,
         )];
-        let detections = algo.on_tick(&state, &parser_state).unwrap();
+        let detections = algo.on_tick(&state, &parser_state, &jg).unwrap();
 
         // Exact match should flag immediately on first flick!
         assert_eq!(detections.len(), 1);
@@ -719,6 +719,8 @@ mod tests {
         let mut algo = SilentAim::new();
         algo.params.require_fire = false;
         algo.params.suspicion_threshold = 2;
+        // since it uses it's own jankguard, this does not need to be mutated
+        let jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
@@ -738,7 +740,7 @@ mod tests {
                 ViewAngle { yaw: 45.0, pitch: 0.0 },
                 true,
             )];
-            let detections = algo.on_tick(&state, &parser_state).unwrap();
+            let detections = algo.on_tick(&state, &parser_state, &jg).unwrap();
             assert_eq!(detections.len(), 0);
         }
 
@@ -752,7 +754,7 @@ mod tests {
             ViewAngle { yaw: 75.0, pitch: 15.0 },
             true,
         )];
-        let _ = algo.on_tick(&state, &parser_state);
+        algo.on_tick(&state, &parser_state, &jg).unwrap();
 
         state.tick = 106.into();
         state.players = vec![create_test_player(
@@ -763,7 +765,7 @@ mod tests {
             ViewAngle { yaw: 45.5, pitch: 0.0 },
             true,
         )];
-        let det1 = algo.on_tick(&state, &parser_state).unwrap();
+        let det1 = algo.on_tick(&state, &parser_state, &jg).unwrap();
         // 1st drift flick should NOT flag yet because suspicion_threshold = 2
         assert_eq!(det1.len(), 0);
 
@@ -778,7 +780,7 @@ mod tests {
                 ViewAngle { yaw: 45.5, pitch: 0.0 },
                 true,
             )];
-            let detections = algo.on_tick(&state, &parser_state).unwrap();
+            let detections = algo.on_tick(&state, &parser_state, &jg).unwrap();
             assert_eq!(detections.len(), 0);
         }
 
@@ -792,7 +794,7 @@ mod tests {
             ViewAngle { yaw: 80.0, pitch: 20.0 },
             true,
         )];
-        let detections = algo.on_tick(&state, &parser_state).unwrap();
+        let detections = algo.on_tick(&state, &parser_state, &jg).unwrap();
         assert_eq!(detections.len(), 0);
 
         state.tick = 111.into();
@@ -804,7 +806,7 @@ mod tests {
             ViewAngle { yaw: 45.9, pitch: 0.0 },
             true,
         )];
-        let det2 = algo.on_tick(&state, &parser_state).unwrap();
+        let det2 = algo.on_tick(&state, &parser_state, &jg).unwrap();
         // 2nd drift flick reaches threshold -> flags!
         assert_eq!(det2.len(), 1);
         assert_eq!(det2[0].data["is_exact_match"], false);
@@ -815,6 +817,8 @@ mod tests {
     fn test_high_pitch_scout_aim_not_filtered() {
         let mut algo = SilentAim::new();
         algo.params.require_fire = false;
+        // since it uses it's own jankguard, this does not need to be mutated
+        let jg = JankGuard::default();
         let mut state = CheatAnalyserState::default();
         let parser_state = test_parser_state();
 
@@ -834,7 +838,7 @@ mod tests {
                 ViewAngle { yaw: 45.0, pitch: 58.0 },
                 true,
             )];
-            let _ = algo.on_tick(&state, &parser_state);
+            algo.on_tick(&state, &parser_state, &jg).unwrap();
         }
 
         // Flick to (65.0, 60.0) -> peak delta ~ 20°
@@ -847,7 +851,7 @@ mod tests {
             ViewAngle { yaw: 65.0, pitch: 60.0 },
             true,
         )];
-        let _ = algo.on_tick(&state, &parser_state);
+        algo.on_tick(&state, &parser_state, &jg).unwrap();
 
         // Snapback to exact (45.0, 58.0)
         state.tick = 106.into();
@@ -859,7 +863,7 @@ mod tests {
             ViewAngle { yaw: 45.0, pitch: 58.0 },
             true,
         )];
-        let detections = algo.on_tick(&state, &parser_state).unwrap();
+        let detections = algo.on_tick(&state, &parser_state, &jg).unwrap();
 
         // Scout aiming downward from high ground MUST NOT be filtered!
         assert_eq!(detections.len(), 1);

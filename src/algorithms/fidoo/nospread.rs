@@ -303,7 +303,6 @@ pub struct Parameters {
 #[derive(Default)]
 pub struct NoSpread {
     params: Parameters,
-    jg: JankGuard,
     prev_players: HashMap<SteamID, (ViewAngle, Tick)>,
     player_tick_deltas: HashMap<SteamID, HashMap<Tick, ViewAngleDelta>>,
     player_trackers: HashMap<SteamID, PlayerTracker>,
@@ -432,14 +431,7 @@ impl CheatAlgorithm for NoSpread {
     }
 
     fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
-        let mut types = self.jg.handled_messages().unwrap_or_default();
-        if !types.contains(&MessageType::TempEntities) {
-            types.push(MessageType::TempEntities);
-        }
-        if !types.contains(&MessageType::GameEvent) {
-            types.push(MessageType::GameEvent);
-        }
-        Ok(types)
+        Ok(vec![MessageType::TempEntities, MessageType::GameEvent])
     }
 
     fn on_message(
@@ -447,10 +439,9 @@ impl CheatAlgorithm for NoSpread {
         message: &Message,
         state: &CheatAnalyserState,
         parser_state: &ParserState,
+        _jg: &JankGuard,
         tick: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
-
         if let Message::TempEntities(msg) = message {
             for event in &msg.events {
                 let class = &parser_state.server_classes[usize::from(event.class_id)].name;
@@ -503,8 +494,7 @@ impl CheatAlgorithm for NoSpread {
         Ok(vec![])
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state)?;
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
 
         let min_shots_evaluated = self.params.min_shots_evaluated;
@@ -514,7 +504,7 @@ impl CheatAlgorithm for NoSpread {
         let min_shots = min_shots_evaluated.max(4);
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
-            let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
+            let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
 
             if ticks_since_event < 60 {
                 if ticks_since_event == 0 {
