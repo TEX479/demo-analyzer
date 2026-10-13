@@ -288,10 +288,42 @@ where
     /// assert_eq!(kv.keys(), &[] as &[&str]);
     /// kv.insert("Apple", 42);
     /// assert_eq!(kv.keys(), &["Apple"]);
+    /// kv.insert("Pear", 69);
+    /// assert_eq!(kv.keys(), &["Apple", "Pear"]);
     /// ```
     pub fn keys(&self) -> &[K] {
         &self.key
     }
+
+    /// gets the values in Self
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::KeyValueVec;
+    /// let mut kv = KeyValueVec::<i32, i32>::new();
+    /// assert_eq!(kv.values(), &[] as &[i32]);
+    /// kv.insert(1, 2);
+    /// assert_eq!(kv.values(), &[2]);
+    /// kv.insert(42, 69);
+    /// assert_eq!(kv.values(), &[2, 69]);
+    /// ```
+    pub fn values(&self) -> &[V] {
+        &self.value
+    }
+
+    /*
+    /// sorts self by
+    pub fn sort_by<F>(&mut self, cmp: F)
+    where
+        F: FnMut(&(K, V), &(K, V)) -> std::cmp::Ordering,
+    {
+        let (key_new, value_new) = std::mem::take(self).into_iter().sorted_by(cmp).unzip();
+        *self = Self {
+            key: key_new,
+            value: value_new,
+        }
+    }
+    // */
 }
 
 impl<K: Debug, V: Debug> Debug for KeyValueVec<K, V> {
@@ -300,7 +332,11 @@ impl<K: Debug, V: Debug> Debug for KeyValueVec<K, V> {
     }
 }
 
-impl<K: Clone, V: Clone> Clone for KeyValueVec<K, V> {
+impl<K, V> Clone for KeyValueVec<K, V>
+where
+    Vec<K>: Clone,
+    Vec<V>: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             key: self.key.clone(),

@@ -2,7 +2,10 @@ use analysis_template::{
     SILENT,
     algorithms::tex::info_logger::Logger,
     lib::{
-        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, BunnyHop, CheatAlgorithm, CrouchSpeed, DoubleTap, NoSpread, OOBPitch, Psilent5, SilentAim},
+        algorithm::{
+            AimSnap, AngleHistory, AngleRepeat, AutoBackstab, BackTrack, BunnyHop, CheatAlgorithm, CrouchSpeed, DoubleTap, NoSpread, OOBPitch, Psilent5,
+            SilentAim,
+        },
         parameters::{Config, try_update_algorithm_params},
     },
     live_analyzer::live_analysis,
@@ -82,11 +85,11 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(AngleHistory::default()),
         Box::new(Psilent5::default()),
         Box::new(CrouchSpeed::new()),
-        // TODO: look over, refactor and add:
-        // nospread
-        // invalid_equip_region
-        // autobackstab
         Box::new(NoSpread::new()),
+        // TODO: look over, refactor and add:
+        // - invalid_equip_region
+        // - autobackstab
+        Box::new(AutoBackstab::new()),
     ];
     config_algorithms_desired(&mut algos);
     algos

@@ -15,8 +15,10 @@ use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::geometry::ViewAngleDelta;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
-use crate::util::helpers::{ViewAngle, handle_to_entid};
+use crate::util::helpers::{KeyValueVec, ViewAngle, handle_to_entid};
 use crate::util::nocrex::jankguard::JankGuard;
+
+static MAX_VALID_SEEDS: usize = 16;
 
 #[derive(Clone, Copy, Debug)]
 struct WeaponSpreadInfo {
@@ -230,15 +232,15 @@ fn compute_predicted_spread(seed: i32, spread_factor: f32) -> ViewAngleDelta {
 
 fn p_value_from_t(t: f64) -> f64 {
     let x = t.abs();
-    let b1 = 0.319381530;
-    let b2 = -0.356563782;
-    let b3 = 1.781477937;
-    let b4 = -1.821255978;
-    let b5 = 1.330274429;
-    let p = 0.2316419;
-    let k = 1.0 / (1.0 + p * x);
+    const B1: f64 = 0.319381530;
+    const B2: f64 = -0.356563782;
+    const B3: f64 = 1.781477937;
+    const B4: f64 = -1.821255978;
+    const B5: f64 = 1.330274429;
+    const P: f64 = 0.2316419;
+    let k = 1.0 / (1.0 + P * x);
     let z = (-0.5 * x * x).exp() / (2.0 * std::f64::consts::PI).sqrt();
-    let cdf_tail = z * (b1 * k + b2 * k.powi(2) + b3 * k.powi(3) + b4 * k.powi(4) + b5 * k.powi(5));
+    let cdf_tail = z * (B1 * k + B2 * k.powi(2) + B3 * k.powi(3) + B4 * k.powi(4) + B5 * k.powi(5));
     (2.0 * cdf_tail).clamp(0.0, 1.0)
 }
 
@@ -268,18 +270,23 @@ fn resolve_player_sid(player_raw: u32, state: &CheatAnalyserState) -> Option<Ste
 
 pub type Tick = u32;
 
-#[derive(Clone, Debug)]
-struct ReversalEvent {
-    tick: Tick,
-    magnitude: f32,
-}
-
 #[derive(Default, Clone)]
 struct PlayerTracker {
     last_flag_tick: Tick,
-    reversals: Vec<ReversalEvent>,
-    shot_samples: Vec<(Tick, ViewAngleDelta, Option<i32>, Option<f32>)>, // tick, delta, seed, spread
+    previous_ticks: KeyValueVec<Tick, PreviousTick>,
     current_weapon: Option<WeaponSpreadInfo>,
+    previous_viewangle: Option<(ViewAngle, Tick)>,
+    last_fire_event: Option<FireEvent>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PreviousTick {
+    /// ViewAngleDelta from previous to current tick
+    delta: ViewAngleDelta,
+    /// the seed from the FireEvent
+    seed: Option<i32>,
+    /// the spread from the FireEvent
+    spread: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -303,10 +310,8 @@ pub struct Parameters {
 #[derive(Default)]
 pub struct NoSpread {
     params: Parameters,
-    prev_players: HashMap<SteamID, (ViewAngle, Tick)>,
-    player_tick_deltas: HashMap<SteamID, HashMap<Tick, ViewAngleDelta>>,
+    // TODO: replace HashMap with Vec
     player_trackers: HashMap<SteamID, PlayerTracker>,
-    fire_events: HashMap<SteamID, Vec<FireEvent>>,
     detections: Vec<Detection>,
 }
 
@@ -325,18 +330,19 @@ impl Default for Parameters {
 
 impl PlayerTracker {
     fn check_seed_correlation(&mut self, player_sid: SteamID, tick: u32, min_shots: usize, min_seed_correlation: f32) -> Option<Detection> {
-        if self.shot_samples.len() < min_shots {
+        if self.previous_ticks.len() < min_shots {
             return None;
         }
 
         let weapon_info = self.current_weapon?;
 
         let valid_seeds: Vec<_> = self
-            .shot_samples
+            .previous_ticks
+            .values()
             .iter()
             .rev()
-            .take(16)
-            .filter_map(|s| s.2.map(|seed| (s.1, seed, s.3)))
+            .filter_map(|s| s.seed.map(|seed| (s.delta, seed, s.spread)))
+            .take(MAX_VALID_SEEDS)
             .collect();
 
         if valid_seeds.len() >= min_shots {
@@ -482,7 +488,7 @@ impl CheatAlgorithm for NoSpread {
                         && let Some(sid) = resolve_player_sid(player_raw, state)
                     {
                         let current_tick: u32 = tick.into();
-                        self.fire_events.entry(sid).or_default().push(FireEvent {
+                        self.player_trackers.entry(sid).or_default().last_fire_event = Some(FireEvent {
                             tick: current_tick,
                             seed: seed_opt,
                             spread: spread_opt,
@@ -499,46 +505,71 @@ impl CheatAlgorithm for NoSpread {
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         let ticknum = u32::from(state.tick);
 
-        let min_shots_evaluated = self.params.min_shots_evaluated;
+        self.params.min_shots_evaluated = self.params.min_shots_evaluated.clamp(4, MAX_VALID_SEEDS);
+        let min_shots = self.params.min_shots_evaluated;
         let min_seed_correlation = self.params.min_seed_correlation;
         let spread_tolerance_margin = self.params.spread_tolerance_margin;
 
-        let min_shots = min_shots_evaluated.max(4);
+        let mut detections = Vec::new();
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
-            let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
+            let tracker = self.player_trackers.entry(steam_id).or_default();
 
+            let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
             if ticks_since_event < 60 {
                 if ticks_since_event == 0 {
                     self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
                 }
-                self.prev_players.insert(steam_id, (player.view_angle, ticknum));
+                tracker.previous_viewangle = Some((player.view_angle, ticknum));
                 continue;
             }
 
-            let (prev_angle, prev_tick) = match self.prev_players.get(&steam_id) {
-                Some(&p) => p,
-                None => {
-                    self.prev_players.insert(steam_id, (player.view_angle, ticknum));
-                    continue;
-                }
+            let Some((prev_angle, prev_tick)) = tracker.previous_viewangle else {
+                tracker.previous_viewangle = Some((player.view_angle, ticknum));
+                continue;
             };
 
             if ticknum == prev_tick + 1 {
                 let va_delta = prev_angle.viewangle_delta(player.view_angle);
-                self.player_tick_deltas.entry(steam_id).or_default().insert(ticknum, va_delta);
+                tracker.previous_ticks.get_mut_or_insert_default(ticknum).delta = va_delta;
             }
 
-            self.prev_players.insert(steam_id, (player.view_angle, ticknum));
+            tracker.previous_viewangle = Some((player.view_angle, ticknum));
+
+            // remove unnecessary ticks from player_history
+            {
+                let mut ticks_to_keep = Vec::new();
+                let mut tick_to_check = ticknum;
+                let mut ticks_checked = 0;
+                while ticks_to_keep.len() < MAX_VALID_SEEDS + 4 && ticks_checked < tracker.previous_ticks.len() {
+                    let Some(tick_data) = tracker.previous_ticks.get(&tick_to_check) else {
+                        tick_to_check = match tick_to_check.checked_sub(1) {
+                            Some(x) => x,
+                            None => break,
+                        };
+                        continue;
+                    };
+
+                    if tick_data.seed.is_some() {
+                        ticks_to_keep.push(tick_to_check);
+                    }
+
+                    ticks_checked += 1;
+                    tick_to_check = match tick_to_check.checked_sub(1) {
+                        Some(x) => x,
+                        None => break,
+                    };
+                }
+                tracker.previous_ticks.retain(|t, _| ticks_to_keep.contains(t));
+            }
 
             // Process bullet fire events for this player
-            if let Some(events) = self.fire_events.get(&steam_id)
-                && let Some(&FireEvent {
-                    tick: f_tick,
-                    seed,
-                    spread,
-                    weapon_id,
-                }) = events.last()
+            if let Some(&FireEvent {
+                tick: f_tick,
+                seed,
+                spread,
+                weapon_id,
+            }) = self.player_trackers.get(&steam_id).and_then(|x| x.last_fire_event.as_ref())
             {
                 // Check if bullet was fired recently (within last 2 ticks)
                 if ticknum >= f_tick && ticknum <= f_tick + 2 {
@@ -549,82 +580,94 @@ impl CheatAlgorithm for NoSpread {
                     let tracker = self.player_trackers.entry(steam_id).or_default();
                     tracker.current_weapon = weapon_info;
 
-                    if let Some(deltas) = self.player_tick_deltas.get(&steam_id) {
-                        // Check single-tick flick and return reversal at f_tick or f_tick+1
-                        for t in f_tick..=f_tick + 1 {
-                            let (Some(&d1), Some(&d2)) = (deltas.get(&t), deltas.get(&(t + 1))) else {
-                                continue;
-                            };
-                            let mag1 = d1.magnitude();
-                            let mag2 = d2.magnitude();
+                    // Check single-tick flick and return reversal at f_tick or f_tick+1
+                    for t in f_tick..=f_tick + 1 {
+                        let (Some(d1), Some(d2)) = (
+                            tracker.previous_ticks.get(&t).map(|pt| pt.delta),
+                            tracker.previous_ticks.get(&(t + 1)).map(|pt| pt.delta),
+                        ) else {
+                            continue;
+                        };
+                        let mag1 = d1.magnitude();
+                        let mag2 = d2.magnitude();
 
-                            let dot = d1.dot(d2);
-                            let sum_mag = (d1 + d2).magnitude();
+                        let dot = d1.dot(d2);
+                        let sum_mag = (d1 + d2).magnitude();
 
-                            let max_cone = weapon_info.map_or(2.5, |w| w.max_cone_degrees) + spread_tolerance_margin;
+                        let max_cone = weapon_info.map_or(2.5, |w| w.max_cone_degrees) + spread_tolerance_margin;
 
-                            if !(mag1 >= 0.70 && mag2 >= 0.70 && mag1 <= max_cone * 2.0 && dot < 0.0) {
-                                continue;
-                            }
+                        if !(mag1 >= 0.70 && mag2 >= 0.70 && mag1 <= max_cone * 2.0 && dot < 0.0) {
+                            continue;
+                        }
 
-                            let cos_angle = dot / (mag1 * mag2);
-                            let cancel_ratio = sum_mag / mag1.max(mag2);
+                        let cos_angle = dot / (mag1 * mag2);
+                        let cancel_ratio = sum_mag / mag1.max(mag2);
 
-                            if !(cos_angle <= -0.65 && cancel_ratio <= 0.65) {
-                                continue;
-                            }
+                        if !(cos_angle <= -0.65 && cancel_ratio <= 0.65) {
+                            continue;
+                        }
 
-                            // Confirmed micro-reversal
-                            tracker.reversals.push(ReversalEvent { tick: t, magnitude: mag1 });
+                        // Confirmed micro-reversal
 
-                            tracker.shot_samples.push((t, d1, seed, spread));
+                        // insert to previous_ticks
+                        {
+                            let pt = tracker.previous_ticks.get_mut_or_insert_default(t);
+                            pt.delta = d1;
+                            pt.seed = seed;
+                            pt.spread = spread;
+                        }
 
-                            let recent_count = tracker.reversals.iter().filter(|r| ticknum.saturating_sub(r.tick) <= 600).count();
+                        let recent_count = tracker
+                            .previous_ticks
+                            .iter()
+                            .filter(|(pt_ticknum, _pt)| ticknum.saturating_sub(**pt_ticknum) <= 600)
+                            .count();
 
-                            let mean_mag: f32 = tracker
-                                .reversals
-                                .iter()
-                                .filter(|r| ticknum.saturating_sub(r.tick) <= 600)
-                                .map(|r| r.magnitude)
-                                .sum::<f32>()
-                                / recent_count.max(1) as f32;
+                        let mean_mag: f32 = tracker
+                            .previous_ticks
+                            .iter()
+                            .filter(|(pt_ticknum, _pt)| ticknum.saturating_sub(**pt_ticknum) <= 600)
+                            .map(|(_, r)| r.delta.magnitude())
+                            .sum::<f32>()
+                            / recent_count.max(1) as f32;
 
-                            let should_flag = recent_count >= 3 && ticknum >= tracker.last_flag_tick + 60;
-                            if should_flag {
-                                tracker.last_flag_tick = ticknum;
-                                let winfo = weapon_info.unwrap_or(WeaponSpreadInfo {
-                                    category_id: weapon_id.unwrap_or(0),
-                                    name: "SpreadWeapon",
-                                    spread_factor: 0.030,
-                                    max_cone_degrees: 1.72,
-                                });
+                        let should_flag = recent_count >= 3 && ticknum >= tracker.last_flag_tick + 60;
+                        if should_flag {
+                            tracker.last_flag_tick = ticknum;
+                            let winfo = weapon_info.unwrap_or(WeaponSpreadInfo {
+                                category_id: weapon_id.unwrap_or(0),
+                                name: "SpreadWeapon",
+                                spread_factor: 0.030,
+                                max_cone_degrees: 1.72,
+                            });
 
-                                self.detections.push(Detection {
-                                    tick: ticknum,
-                                    algorithm: Self::ALGORITHM_NAME,
-                                    player: steam_id,
-                                    data: json!({
-                                        "type": "MicroJitterReversal",
-                                        "weapon_id": winfo.category_id,
-                                        "weapon_name": winfo.name,
-                                        "reversals_count": recent_count,
-                                        "mean_flick_magnitude": (mean_mag * 100.0).round() / 100.0,
-                                        "max_allowed_cone": (winfo.max_cone_degrees * 100.0).round() / 100.0,
-                                    }),
-                                });
-                            }
+                            detections.push(Detection {
+                                tick: ticknum,
+                                algorithm: Self::ALGORITHM_NAME,
+                                player: steam_id,
+                                data: json!({
+                                    "type": "MicroJitterReversal",
+                                    "weapon_id": winfo.category_id,
+                                    "weapon_name": winfo.name,
+                                    "reversals_count": recent_count,
+                                    "mean_flick_magnitude": (mean_mag * 100.0).round() / 100.0,
+                                    "max_allowed_cone": (winfo.max_cone_degrees * 100.0).round() / 100.0,
+                                }),
+                            });
+                        }
 
-                            // Check Method A deterministic seed correlation
-                            if let Some(det) = tracker.check_seed_correlation(steam_id, ticknum, min_shots, min_seed_correlation) {
-                                self.detections.push(det);
-                            }
+                        // Check Method A deterministic seed correlation
+                        if let Some(det) = tracker.check_seed_correlation(steam_id, ticknum, min_shots, min_seed_correlation) {
+                            detections.push(det);
                         }
                     }
                 }
             }
         }
 
-        Ok(vec![])
+        self.detections.extend_from_slice(&detections);
+        // TODO: incorperate `self.params.min_detections` and improve this
+        Ok(detections)
     }
 
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
