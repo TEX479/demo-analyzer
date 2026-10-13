@@ -94,7 +94,7 @@ impl CheatAlgorithm for CrouchSpeed {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         Self::ALGORITHM_NAME
     }
 
@@ -173,10 +173,10 @@ impl CheatAlgorithm for CrouchSpeed {
                 continue;
             }
 
-            let (dx, dy, dz) = if let Some(prev) = pstate.prev_pos {
-                (player.position.x - prev.x, player.position.y - prev.y, player.position.z - prev.z)
+            let Vec3 { x: dx, y: dy, z: dz } = if let Some(prev) = pstate.prev_pos {
+                player.position - prev
             } else {
-                (0.0, 0.0, 0.0)
+                Vec3::default()
             };
 
             let moved = (dx * dx + dy * dy) > 0.001 || dz.abs() > 0.001;
@@ -216,33 +216,37 @@ impl CheatAlgorithm for CrouchSpeed {
             // Filter out steep downward slopes/slides/falls (vz < -100 HU/s)
             let is_downward_slide = dz < -(max_vertical_speed * TICK_INTERVAL);
 
-            if is_on_ground && is_ducking && current_speed >= effective_threshold && !is_downward_slide {
-                pstate.consecutive_ticks += 1;
-
-                if pstate.consecutive_ticks >= min_consecutive_ticks as u32 {
-                    let should_emit = match pstate.last_detection_tick {
-                        Some(last_tick) => ticknum.saturating_sub(last_tick) >= debounce_ticks as u32,
-                        None => true,
-                    };
-
-                    if should_emit {
-                        pstate.last_detection_tick = Some(ticknum);
-                        detections.push(Detection {
-                            tick: ticknum,
-                            algorithm: Self::ALGORITHM_NAME.to_string(),
-                            player: steam_id,
-                            data: json!({
-                                "speed": (current_speed * 10.0).round() / 10.0,
-                                "threshold": effective_threshold,
-                                "consecutive_ticks": pstate.consecutive_ticks,
-                                "class": player.class_name(),
-                            }),
-                        });
-                    }
-                }
-            } else {
+            let is_crouchspeed_tick = is_on_ground && is_ducking && current_speed >= effective_threshold && !is_downward_slide;
+            if !is_crouchspeed_tick {
                 pstate.consecutive_ticks = 0;
+                continue;
             }
+
+            pstate.consecutive_ticks += 1;
+            if pstate.consecutive_ticks < min_consecutive_ticks as u32 {
+                continue;
+            }
+
+            let should_emit = match pstate.last_detection_tick {
+                Some(last_tick) => ticknum.saturating_sub(last_tick) >= debounce_ticks as u32,
+                None => true,
+            };
+            if !should_emit {
+                continue;
+            }
+
+            pstate.last_detection_tick = Some(ticknum);
+            detections.push(Detection {
+                tick: ticknum,
+                algorithm: Self::ALGORITHM_NAME,
+                player: steam_id,
+                data: json!({
+                    "speed": (current_speed * 10.0).round() / 10.0,
+                    "threshold": effective_threshold,
+                    "consecutive_ticks": pstate.consecutive_ticks,
+                    "class": player.class_name(),
+                }),
+            });
         }
 
         Ok(detections)
@@ -348,7 +352,6 @@ mod tests {
         }
     }
 
-    // FIX: test fails
     #[test]
     fn test_crouchspeed_cheater_triggers_detection() {
         // Cheater with DuckSpeed: Soldier moving at 220 HU/s while crouched on ground for 50 ticks

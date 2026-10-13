@@ -301,6 +301,8 @@ impl SilentAim {
         }
         false
     }
+
+    const ALGORITHM_NAME: &'static str = "fidoo/silent_aim";
 }
 
 impl CheatAlgorithm for SilentAim {
@@ -308,8 +310,8 @@ impl CheatAlgorithm for SilentAim {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
-        "fidoo/silent_aim"
+    fn algorithm_name(&self) -> &'static str {
+        Self::ALGORITHM_NAME
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
@@ -357,7 +359,6 @@ impl CheatAlgorithm for SilentAim {
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         self.jg.on_tick(state)?;
         let ticknum = u32::from(state.tick);
-        let algo_name = self.algorithm_name().to_string();
 
         let tick_window = self.params.tick_window.max(2);
         let max_delta_first_third = self.params.max_delta_first_third;
@@ -559,7 +560,7 @@ impl CheatAlgorithm for SilentAim {
                     if is_exact || pstate.suspicion_count >= suspicion_threshold {
                         let detection = Detection {
                             tick: ticknum,
-                            algorithm: algo_name.clone(),
+                            algorithm: Self::ALGORITHM_NAME,
                             player: steam_id,
                             data: json!({
                                 "class": class_name,

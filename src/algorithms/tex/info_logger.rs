@@ -24,7 +24,7 @@ impl Default for Parameters {
     fn default() -> Self {
         Self {
             votes: true,
-            class_switches: true,
+            class_switches: false,
         }
     }
 }
@@ -38,7 +38,7 @@ impl CheatAlgorithm for Logger {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "tex/info_logger"
     }
 

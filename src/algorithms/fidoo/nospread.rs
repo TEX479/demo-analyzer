@@ -383,7 +383,7 @@ impl PlayerTracker {
                 self.last_flag_tick = tick;
                 return Some(Detection {
                     tick,
-                    algorithm: "fidoo/nospread".to_string(),
+                    algorithm: NoSpread::ALGORITHM_NAME,
                     player: player_sid,
                     data: json!({
                         "type": "SeedCorrelation",
@@ -402,6 +402,8 @@ impl PlayerTracker {
 }
 
 impl NoSpread {
+    const ALGORITHM_NAME: &'static str = "fidoo/nospread";
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -412,8 +414,8 @@ impl CheatAlgorithm for NoSpread {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
-        "fidoo/nospread"
+    fn algorithm_name(&self) -> &'static str {
+        Self::ALGORITHM_NAME
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
@@ -599,7 +601,7 @@ impl CheatAlgorithm for NoSpread {
 
                                 self.detections.push(Detection {
                                     tick: ticknum,
-                                    algorithm: "fidoo/nospread".to_string(),
+                                    algorithm: Self::ALGORITHM_NAME,
                                     player: steam_id,
                                     data: json!({
                                         "type": "MicroJitterReversal",
@@ -662,13 +664,13 @@ mod tests {
         // Player 1 has 2 detections (below default threshold of 3)
         algo.detections.push(Detection {
             tick: 100,
-            algorithm: "fidoo/nospread".to_string(),
+            algorithm: algo.algorithm_name(),
             player: sid1,
             data: json!({"type": "MicroJitterReversal"}),
         });
         algo.detections.push(Detection {
             tick: 200,
-            algorithm: "fidoo/nospread".to_string(),
+            algorithm: algo.algorithm_name(),
             player: sid1,
             data: json!({"type": "MicroJitterReversal"}),
         });
@@ -676,19 +678,19 @@ mod tests {
         // Player 2 has 3 detections (meets default threshold of 3)
         algo.detections.push(Detection {
             tick: 150,
-            algorithm: "fidoo/nospread".to_string(),
+            algorithm: algo.algorithm_name(),
             player: sid2,
             data: json!({"type": "MicroJitterReversal"}),
         });
         algo.detections.push(Detection {
             tick: 250,
-            algorithm: "fidoo/nospread".to_string(),
+            algorithm: algo.algorithm_name(),
             player: sid2,
             data: json!({"type": "MicroJitterReversal"}),
         });
         algo.detections.push(Detection {
             tick: 350,
-            algorithm: "fidoo/nospread".to_string(),
+            algorithm: algo.algorithm_name(),
             player: sid2,
             data: json!({"type": "MicroJitterReversal"}),
         });
@@ -707,7 +709,7 @@ mod tests {
 
         algo.detections.push(Detection {
             tick: 100,
-            algorithm: "fidoo/nospread".to_string(),
+            algorithm: algo.algorithm_name(),
             player: sid1,
             data: json!({"type": "MicroJitterReversal"}),
         });

@@ -699,7 +699,7 @@ impl CheatAnalyser {
             a.tick
                 .cmp(&b.tick)
                 .then_with(|| u64::from(a.player).cmp(&u64::from(b.player)))
-                .then_with(|| a.algorithm.cmp(&b.algorithm))
+                .then_with(|| a.algorithm.cmp(b.algorithm))
         });
         Ok(())
     }
@@ -735,11 +735,9 @@ impl CheatAnalyser {
     }
 
     pub fn print_detection_summary(&self) {
-        let mut algorithm_counts: HashMap<String, HashMap<SteamID, usize>> = HashMap::new();
+        let mut algorithm_counts: HashMap<&str, HashMap<SteamID, usize>> = HashMap::new();
         for detection in &self.detections {
-            let algorithm = detection.algorithm.clone();
-            let steamid = detection.player;
-            *algorithm_counts.entry(algorithm).or_default().entry(steamid).or_insert(0) += 1;
+            *algorithm_counts.entry(detection.algorithm).or_default().entry(detection.player).or_insert(0) += 1;
         }
 
         dev_print!("Total detections: {}", self.detections.len());
@@ -757,7 +755,7 @@ impl CheatAnalyser {
             let mut steamid_counts_vec: Vec<_> = steamid_counts.into_iter().collect();
             steamid_counts_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
             for (steamid, count) in steamid_counts_vec {
-                dev_print!("    {}: {}", steamid.steam3(), count);
+                dev_print!("    {}/{}: {}", u64::from(steamid), steamid.steam3(), count);
             }
         }
     }

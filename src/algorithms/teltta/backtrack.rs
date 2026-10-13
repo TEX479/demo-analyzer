@@ -53,7 +53,7 @@ impl CheatAlgorithm for BackTrack {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "teltta/backtrack"
     }
 
@@ -169,7 +169,7 @@ impl CheatAlgorithm for BackTrack {
 
                     detections.push(Detection {
                         tick: tick.into(),
-                        algorithm: self.algorithm_name().to_string(),
+                        algorithm: self.algorithm_name(),
                         player: attacker_sid,
                         data: new_data,
                     });

@@ -82,7 +82,9 @@ impl Gui {
         algorithms.retain(|a| self.algos[a.algorithm_name()]);
 
         for a in algorithms.iter_mut() {
+            let algo_name = a.algorithm_name();
             if let (Some(config_params), Some(mut algo_params)) = (self.config.get(a.algorithm_name()), a.params()) {
+                tracing::info!("updating params for {}", algo_name);
                 try_update_algorithm_params(&mut algo_params, config_params);
             }
         }
@@ -253,17 +255,17 @@ impl eframe::App for Gui {
                 egui::ScrollArea::vertical().id_salt("players").show(ui, |ui| {
                     ui.set_min_width(160.0);
                     ui.vertical(|ui| {
-                        for player in self.detections.iter().sorted_by_key(|d| d.1.len()).rev() {
+                        for (&steam_id, detections) in self.detections.iter().sorted_by_key(|d| d.1.len()).rev() {
                             let res = ui.selectable_label(
-                                self.selected_player.is_some_and(|u| u == *player.0),
-                                format!("{} ({})", player.0.steam3(), player.1.len()),
+                                self.selected_player.is_some_and(|u| u == steam_id),
+                                format!("{}/{} ({})", u64::from(steam_id), steam_id.steam3(), detections.len()),
                             );
                             if res.clicked() {
-                                self.selected_player = Some(*player.0);
+                                self.selected_player = Some(steam_id);
                                 self.selected_detection = None;
                             }
                             if res.double_clicked() {
-                                let _ = opener::open_browser(format!("https://steamcommunity.com/profiles/{}", player.0.steam3()));
+                                let _ = opener::open_browser(format!("https://steamcommunity.com/profiles/{}", u64::from(steam_id)));
                             }
                         }
                     });

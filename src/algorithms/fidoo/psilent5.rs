@@ -169,6 +169,8 @@ impl Psilent5 {
         self.pending = waiting;
         detections
     }
+
+    const ALGORITHM_NAME: &'static str = "fidoo/psilent5";
 }
 
 impl CheatAlgorithm for Psilent5 {
@@ -176,8 +178,8 @@ impl CheatAlgorithm for Psilent5 {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
-        "fidoo/psilent5"
+    fn algorithm_name(&self) -> &'static str {
+        Self::ALGORITHM_NAME
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
@@ -588,7 +590,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         serial: candidate.serial,
         detection: Detection {
             tick: candidate.tick,
-            algorithm: "fidoo/psilent5".to_string(),
+            algorithm: Psilent5::ALGORITHM_NAME,
             player: candidate.player,
             data: json!({
                 "class": candidate.player_class,

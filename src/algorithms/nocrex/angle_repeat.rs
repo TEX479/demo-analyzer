@@ -58,7 +58,7 @@ impl CheatAlgorithm for AngleRepeat {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "nocrex/angle_repeat"
     }
 
@@ -109,7 +109,7 @@ impl CheatAlgorithm for AngleRepeat {
                 if first_third_delta <= max_first_third_angle_delta && ratio > min_angle_diff_ratio && jg.fired(&steam_id, ticknum) < 3 {
                     self.detections.push(Detection {
                         tick: ticknum,
-                        algorithm: self.algorithm_name().to_string(),
+                        algorithm: self.algorithm_name(),
                         player: steam_id,
                         data: json!({
                             "angle_1": first_angle,

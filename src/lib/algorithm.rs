@@ -95,8 +95,7 @@ pub fn analyse(demo: &Demo, algorithms: Vec<Box<dyn CheatAlgorithm + Send>>) -> 
 pub trait CheatAlgorithm {
     fn enabled_by_default(&self) -> bool;
 
-    // TODO: check if this can be a `&'static str`
-    fn algorithm_name(&self) -> &str;
+    fn algorithm_name(&self) -> &'static str;
 
     // TODO: find a way to impl mutable params without forcing the slow-ish parsing of params
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
@@ -153,7 +152,7 @@ pub trait CheatAlgorithm {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Detection {
     pub tick: u32,
-    pub algorithm: String,
+    pub algorithm: &'static str,
     pub player: SteamID,
     pub data: Value,
 }

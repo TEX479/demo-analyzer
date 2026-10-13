@@ -60,6 +60,8 @@ impl Default for Parameters {
 }
 
 impl BunnyHop {
+    const ALGORITHM_NAME: &'static str = "fidoo/bunnyhop";
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -70,8 +72,8 @@ impl CheatAlgorithm for BunnyHop {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
-        "fidoo/bunnyhop"
+    fn algorithm_name(&self) -> &'static str {
+        Self::ALGORITHM_NAME
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
@@ -89,7 +91,6 @@ impl CheatAlgorithm for BunnyHop {
         let min_speed = self.params.min_speed;
 
         let mut tick_detections = Vec::new();
-        let algo_name = self.algorithm_name().to_string();
 
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
@@ -199,7 +200,7 @@ impl CheatAlgorithm for BunnyHop {
                             let max_speed = pstate.hop_speeds.iter().cloned().fold(0.0_f32, f32::max);
                             let detection = Detection {
                                 tick: ticknum,
-                                algorithm: algo_name.clone(),
+                                algorithm: Self::ALGORITHM_NAME,
                                 player: steam_id,
                                 data: json!({
                                     "class": player.class_name(),
@@ -244,7 +245,7 @@ impl CheatAlgorithm for BunnyHop {
                                 let max_speed = pstate.hop_speeds.iter().cloned().fold(0.0_f32, f32::max);
                                 let detection = Detection {
                                     tick: ticknum,
-                                    algorithm: algo_name.clone(),
+                                    algorithm: Self::ALGORITHM_NAME,
                                     player: steam_id,
                                     data: json!({
                                         "class": player.class_name(),

@@ -93,7 +93,7 @@ impl CheatAlgorithm for ViewAnglesToCSV {
         false
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "viewangles_to_csv"
     }
 

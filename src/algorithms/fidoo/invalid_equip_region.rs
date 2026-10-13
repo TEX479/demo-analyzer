@@ -87,7 +87,7 @@ impl CheatAlgorithm for InvalidEquipRegion {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "fidoo/invalid_equip_region"
     }
 
@@ -400,7 +400,7 @@ impl CheatAlgorithm for InvalidEquipRegion {
 
                             detections.push(Detection {
                                 tick: self.current_tick,
-                                algorithm: "fidoo/invalid_equip_region".to_string(),
+                                algorithm: self.algorithm_name(),
                                 player: steam_id64,
                                 data: json!({
                                     "class": player.class_name(),

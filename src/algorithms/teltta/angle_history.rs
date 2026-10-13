@@ -50,7 +50,7 @@ impl CheatAlgorithm for AngleHistory {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "teltta/angle_history"
     }
 
@@ -115,7 +115,7 @@ impl CheatAlgorithm for AngleHistory {
                 if mid_delta > min_delta_second_third && jg.fired(&steam_id, ticknum) <= (match_index as u32 + 5) {
                     self.detections.push(Detection {
                         tick: ticknum,
-                        algorithm: self.algorithm_name().to_string(),
+                        algorithm: self.algorithm_name(),
                         player: steam_id,
                         data: json!({
                             // TODO: check if `current_angle` needs to be present twice

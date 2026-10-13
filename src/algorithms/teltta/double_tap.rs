@@ -65,7 +65,7 @@ impl CheatAlgorithm for DoubleTap {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "teltta/doubletap"
     }
 
@@ -158,7 +158,7 @@ impl CheatAlgorithm for DoubleTap {
 
                 detections.push(Detection {
                     tick: tick.into(),
-                    algorithm: self.algorithm_name().to_string(),
+                    algorithm: self.algorithm_name(),
                     player: attacker_sid,
                     data: new_data,
                 });

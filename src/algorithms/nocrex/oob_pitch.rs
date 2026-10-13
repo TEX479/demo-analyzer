@@ -51,7 +51,7 @@ impl CheatAlgorithm for OOBPitch {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "nocrex/oob_pitch"
     }
 
@@ -91,7 +91,7 @@ impl CheatAlgorithm for OOBPitch {
                     if !self.last_detections.contains(&steam_id) {
                         submitted_detections.push(Detection {
                             tick: ticknum,
-                            algorithm: self.algorithm_name().to_string(),
+                            algorithm: self.algorithm_name(),
                             player: steam_id,
                             data: json!({
                                 "pitch": player.view_angle.pitch,

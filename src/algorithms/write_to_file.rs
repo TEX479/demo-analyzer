@@ -62,7 +62,7 @@ impl CheatAlgorithm for WriteToFile {
         false
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "write_to_file"
     }
 

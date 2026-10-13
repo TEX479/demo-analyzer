@@ -106,6 +106,8 @@ impl Default for Parameters {
 }
 
 impl Psilent4 {
+    const ALGORITHM_NAME: &'static str = "fidoo/psilent4";
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -176,8 +178,8 @@ impl CheatAlgorithm for Psilent4 {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
-        "fidoo/psilent4"
+    fn algorithm_name(&self) -> &'static str {
+        Self::ALGORITHM_NAME
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
@@ -539,7 +541,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         serial: candidate.serial,
         detection: Detection {
             tick: candidate.tick,
-            algorithm: "fidoo/psilent4".to_string(),
+            algorithm: Psilent4::ALGORITHM_NAME,
             player: candidate.player,
             data: json!({
                 "class": candidate.player_class,

@@ -65,7 +65,7 @@ impl CheatAlgorithm for AimSnap {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "nocrex/aimsnap"
     }
 
@@ -107,7 +107,7 @@ impl CheatAlgorithm for AimSnap {
             {
                 self.detections.push(Detection {
                     tick: ticknum - 2,
-                    algorithm: self.algorithm_name().to_string(),
+                    algorithm: self.algorithm_name(),
                     player: steam_id,
                     data: json!({
                         "deltas": delta_magnitudes

@@ -46,7 +46,7 @@ impl CheatAlgorithm for ViewAngles180Degrees {
     }
 
     // REQUIRED: Set your algorithm's name here. Best practice is to match the filename.
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "viewangles_180degrees"
     }
 
@@ -76,7 +76,7 @@ impl CheatAlgorithm for ViewAngles180Degrees {
             if va_delta.yaw.abs() > 179.0 || va_delta.pitch.abs() >= 179.0 {
                 detections.push(Detection {
                     tick: ticknum,
-                    algorithm: self.algorithm_name().to_string(),
+                    algorithm: self.algorithm_name(),
                     player: steam_id,
                     data: json!({ "delta_yaw": va_delta.yaw, "delta_pitch": va_delta.pitch }),
                 });

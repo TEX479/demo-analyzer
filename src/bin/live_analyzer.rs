@@ -2,7 +2,7 @@ use analysis_template::{
     SILENT,
     algorithms::tex::info_logger::Logger,
     lib::{
-        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, OOBPitch, Psilent5, SilentAim},
+        algorithm::{AimSnap, AngleHistory, AngleRepeat, BackTrack, BunnyHop, CheatAlgorithm, CrouchSpeed, DoubleTap, NoSpread, OOBPitch, Psilent5, SilentAim},
         parameters::{Config, try_update_algorithm_params},
     },
     live_analyzer::live_analysis,
@@ -77,14 +77,16 @@ fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(DoubleTap::new()),
         Box::new(SilentAim::new()),
         Box::new(BunnyHop::new()),
+        // AngleRepeat & AngleHistory are somewhat the same as SilentAim, but less elaborate
         Box::new(AngleRepeat::new()),
         Box::new(AngleHistory::default()),
         Box::new(Psilent5::default()),
+        Box::new(CrouchSpeed::new()),
         // TODO: look over, refactor and add:
-        // crouchspeed/duckspeed
         // nospread
         // invalid_equip_region
         // autobackstab
+        Box::new(NoSpread::new()),
     ];
     config_algorithms_desired(&mut algos);
     algos
@@ -94,17 +96,18 @@ fn config_algorithms_desired(algorithms: &mut Vec<Box<dyn CheatAlgorithm + Send>
     let Some(config) = CONFIG.as_ref() else { return };
 
     for algo in algorithms.iter_mut() {
-        let algorithm_name = algo.algorithm_name().to_owned();
+        let algorithm_name = algo.algorithm_name();
 
         let Some(mut algo_params) = algo.params() else {
             continue;
         };
 
-        let Some(config_params) = config.get(&algorithm_name) else {
+        let Some(config_params) = config.get(algorithm_name) else {
             tracing::info!("no config found for {:?}, using default: {:?}", algorithm_name, algo_params);
             continue;
         };
 
+        tracing::info!("updating params for {}", algorithm_name);
         try_update_algorithm_params(&mut algo_params, config_params);
     }
 }

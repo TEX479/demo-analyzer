@@ -54,7 +54,7 @@ impl CheatAlgorithm for AllMessages {
         false
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "all_messages"
     }
 

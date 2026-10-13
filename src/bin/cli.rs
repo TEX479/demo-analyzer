@@ -76,6 +76,7 @@ fn main() -> Result<(), Error> {
             let mut algo_params = algo_params.unwrap();
             dev_print!("  {}", algorithm_name);
             if let Some(config_params) = config.get(&algorithm_name) {
+                tracing::info!("updating params for {}", algorithm_name);
                 try_update_algorithm_params(&mut algo_params, config_params);
             } else {
                 tracing::info!("no config for algorithm {:?} found. using default values: {:?}", algorithm_name, algo_params);

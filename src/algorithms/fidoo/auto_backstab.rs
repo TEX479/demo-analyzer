@@ -342,7 +342,7 @@ impl CheatAlgorithm for AutoBackstab {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "fidoo/auto_backstab"
     }
 
@@ -661,7 +661,7 @@ impl CheatAlgorithm for AutoBackstab {
                         {
                             let detection = Detection {
                                 tick: t_attack,
-                                algorithm: self.algorithm_name().to_string(),
+                                algorithm: self.algorithm_name(),
                                 player: attacker_sid,
                                 data: data_json,
                             };
@@ -747,7 +747,7 @@ impl CheatAlgorithm for AutoBackstab {
                         if self.logged_detections.insert((player_sid, record.tick)) {
                             let detection = Detection {
                                 tick: record.tick,
-                                algorithm: self.algorithm_name().to_string(),
+                                algorithm: self.algorithm_name(),
                                 player: player_sid,
                                 data: record.data.clone(),
                             };
