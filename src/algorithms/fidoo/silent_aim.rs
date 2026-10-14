@@ -324,6 +324,7 @@ impl CheatAlgorithm for SilentAim {
                 exact_match_epsilon,
                 suspicion_threshold,
                 min_pvs_ticks,
+                require_fire,
                 fire_sync_ticks,
                 clean_ticks_to_reset,
             ]

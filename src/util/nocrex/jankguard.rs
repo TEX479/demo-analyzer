@@ -11,6 +11,9 @@ use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 
 const TELEPORT_DIST: f32 = 256.0;
 
+/// number of ticks after teleport / spawn event where detections may be faulty
+pub const EVENT_TIMEOUT: u32 = 60;
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 struct PlayerData {
     pub last_spawn: u32,

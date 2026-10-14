@@ -12,7 +12,7 @@ use crate::{
             KeyValueVec, ViewAngle,
             player_finders::{players_alive_and_in_pvs, valid_players},
         },
-        nocrex::jankguard::JankGuard,
+        nocrex::jankguard::{EVENT_TIMEOUT, JankGuard},
     },
 };
 use anyhow::Error;
@@ -68,9 +68,9 @@ impl CheatAlgorithm for AngleHistory {
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(players.iter())) {
             let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
 
-            if ticks_since_event < 60 {
+            if ticks_since_event < EVENT_TIMEOUT {
                 if ticks_since_event == 0 {
-                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > 60);
+                    self.detections.retain(|det| det.player != steam_id || (ticknum - det.tick) > EVENT_TIMEOUT);
                 }
                 continue;
             }
@@ -132,11 +132,20 @@ impl CheatAlgorithm for AngleHistory {
                 }
             }
         }
-        Ok(vec![])
+
+        let detections_final = self
+            .detections
+            .iter()
+            .filter(|d| ticknum.saturating_sub(d.tick) >= EVENT_TIMEOUT)
+            .cloned()
+            .collect();
+        self.detections.retain(|d| ticknum.saturating_sub(d.tick) < EVENT_TIMEOUT);
+
+        Ok(detections_final)
     }
 
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
-        Ok(self.detections.clone())
+        Ok(std::mem::take(&mut self.detections))
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {

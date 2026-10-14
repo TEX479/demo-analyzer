@@ -311,6 +311,14 @@ where
         &self.value
     }
 
+    pub fn into_keys(self) -> Vec<K> {
+        self.key
+    }
+
+    pub fn into_values(self) -> Vec<V> {
+        self.value
+    }
+
     /*
     /// sorts self by
     pub fn sort_by<F>(&mut self, cmp: F)

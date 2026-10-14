@@ -1,5 +1,3 @@
-// TODO: consider replacing any and all hashmaps in this file using vecs
-// this would make things a bit faster but more importantly allow for ordered parameters with arbitrary name
 use std::{collections::HashMap, fmt::Display};
 
 use anyhow::Context;

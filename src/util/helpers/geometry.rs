@@ -661,3 +661,16 @@ impl TryFrom<&tf_demo_parser::demo::sendprop::SendPropValue> for Vec3 {
         tf_demo_parser::demo::vector::Vector::try_from(value).map(Vec3::from)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_angles_roundtrip() {
+        let dir = ViewAngle { yaw: 45.0, pitch: 15.0 }.to_unit_vec();
+        let ViewAngle { yaw, pitch } = dir.into();
+        assert!((yaw - 45.0).abs() < 0.01);
+        assert!((pitch - 15.0).abs() < 0.01);
+    }
+}

@@ -1,11 +1,12 @@
 // TODO: refactor more
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::message::packetentities::{EntityId, UpdateType};
+use tf_demo_parser::demo::parser::analyser::Class;
 use tf_demo_parser::demo::sendprop::SendPropIdentifier;
 use tf_demo_parser::{MessageType, ParserState};
 
@@ -13,7 +14,8 @@ use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
-use crate::util::helpers::{Vec3, ViewAngle, handle_to_entid};
+use crate::util::helpers::geometry::ViewAngleDelta;
+use crate::util::helpers::{KeyValueVec, Vec3, ViewAngle, handle_to_entid};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const HISTORY_TICKS: u32 = 40;
@@ -25,9 +27,11 @@ const EYE_HEIGHTS: [f32; 6] = [45.0, 50.0, 56.0, 62.0, 68.0, 72.0];
 // Candidate target convergence distances in Hammer Units
 const CANDIDATE_DISTANCES: [f32; 9] = [24.0, 48.0, 96.0, 192.0, 384.0, 768.0, 1536.0, 2000.0, 4000.0];
 
+type Tick = u32;
+
 #[derive(Debug, Clone)]
 struct PlayerSnapshot {
-    tick: u32,
+    tick: Tick,
     position: Vec3,
     angle: ViewAngle,
     simtime: u16,
@@ -37,7 +41,7 @@ struct PlayerSnapshot {
 }
 
 impl PlayerSnapshot {
-    fn new(tick: u32, player: &Player) -> Self {
+    fn new(tick: Tick, player: &Player) -> Self {
         Self {
             tick,
             position: player.position,
@@ -53,9 +57,9 @@ impl PlayerSnapshot {
 #[derive(Debug, Clone)]
 // TODO: check if `String`s are necessary
 struct LaunchCandidate {
-    tick: u32,
+    tick: Tick,
     player: SteamID,
-    player_class: &'static str,
+    player_class: Class,
     weapon_name: String,
     player_ping: u16,
     projectile: String,
@@ -70,9 +74,25 @@ struct LaunchCandidate {
 
 #[derive(Debug, Clone)]
 struct TentativeDetection {
-    detection: Detection,
+    player: SteamID,
+    tick: Tick,
+
+    class: Class,
+    weapon_name: String,
+    projectile_name: String,
     projectile_entity: u32,
-    serial: u32,
+    projectile_serial: u32,
+    origin: Vec3,
+    initial_velocity: Vec3,
+    launch_angle: ViewAngle,
+    view_angle: ViewAngle,
+    view_tick: Tick,
+    raw_angle_delta: f32,
+    compensated_angle_delta: f32,
+    view_angle_delta: ViewAngleDelta,
+    owner_distance: f32,
+    pipe_type: Option<i64>,
+    sample_count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -81,27 +101,37 @@ pub struct Psilent5 {
     pending: Vec<LaunchCandidate>,
     tentative: Vec<TentativeDetection>,
     /// HashMap<(EntityIndex, SerialNumber), FirstTick>
-    observations: HashMap<(u32, u32), u32>,
+    observations: HashMap<(u32, u32), Tick>,
     params: Parameters,
+
+    /// HashMap<Player, (EntityId, SerialNumber)>
+    suspicious_launches: HashMap<SteamID, HashSet<(u32, u32)>>,
+    last_detection: KeyValueVec<SteamID, Tick>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
-    pub angle_threshold: f32,
+    pub angle_threshold_suspicious: f32,
+    pub angle_threshold_blatant: f32,
     pub lookaround_ticks: u32,
     pub max_owner_distance: f32,
     pub minimum_samples: usize,
+    // TODO: implement minimum launches to on-tick detections
     pub minimum_suspicious_launches: usize,
+    /// amount of ticks that has to pass between 2 detections
+    pub detection_cooldown: u32,
 }
 
 impl Default for Parameters {
     fn default() -> Self {
         Self {
-            angle_threshold: 6.0,
+            angle_threshold_suspicious: 6.0,
+            angle_threshold_blatant: 25.0,
             lookaround_ticks: 18,
             max_owner_distance: 115.0,
             minimum_samples: 2,
             minimum_suspicious_launches: 2,
+            detection_cooldown: 3,
         }
     }
 }
@@ -141,12 +171,12 @@ impl Psilent5 {
         history.push_back(snapshot);
     }
 
-    fn resolve_pending(&mut self, current_tick: u32, flush: bool) -> Vec<TentativeDetection> {
+    fn resolve_pending(&mut self, current_tick: Tick, flush: bool) -> Vec<TentativeDetection> {
         let lookaround_ticks = self.params.lookaround_ticks;
         let mut waiting = Vec::new();
         let mut detections = Vec::new();
 
-        for candidate in self.pending.drain(..) {
+        for candidate in std::mem::take(&mut self.pending).into_iter() {
             if !self.histories.contains_key(&candidate.player) {
                 if !flush {
                     waiting.push(candidate);
@@ -184,7 +214,8 @@ impl CheatAlgorithm for Psilent5 {
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
         let params = make_algorithm_params!(self.params; [
-            angle_threshold,
+            angle_threshold_suspicious,
+            angle_threshold_blatant,
             lookaround_ticks,
             max_owner_distance,
             minimum_samples,
@@ -200,8 +231,52 @@ impl CheatAlgorithm for Psilent5 {
     fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
         self.record_state(state);
         let resolved = self.resolve_pending(state.tick.into(), false);
-        self.tentative.extend(resolved);
-        Ok(vec![])
+
+        for td in resolved.into_iter() {
+            if self
+                .suspicious_launches
+                .entry(td.player)
+                .or_default()
+                .insert((td.projectile_entity, td.projectile_serial))
+            {
+                self.tentative.push(td);
+            };
+        }
+
+        let mut detections = Vec::new();
+
+        for td in std::mem::take(&mut self.tentative).into_iter() {
+            let delta_is_blatant = td.compensated_angle_delta >= self.params.angle_threshold_blatant;
+            let suspicious_launches_exceeded = match self
+                .suspicious_launches
+                .get(&td.player)
+                .map(|c| c.len() >= self.params.minimum_suspicious_launches)
+            {
+                Some(v) => v,
+                None => {
+                    tracing::error!(
+                        "no recorded suspicious_launches for {}/{}, yet detections contain one",
+                        u64::from(td.player),
+                        td.player.steam3()
+                    );
+                    false
+                }
+            };
+            let tick_cooldown_is_ready = self
+                .last_detection
+                .get(&td.player)
+                .map(|last_detection| td.tick.saturating_sub(*last_detection) > self.params.detection_cooldown)
+                .unwrap_or(true);
+
+            if (delta_is_blatant || suspicious_launches_exceeded) && tick_cooldown_is_ready {
+                _ = self.last_detection.insert(td.player, td.tick);
+                detections.push(Detection::from(td));
+            } else {
+                self.tentative.push(td);
+            }
+        }
+
+        Ok(detections)
     }
 
     fn on_message(
@@ -273,7 +348,6 @@ impl CheatAlgorithm for Psilent5 {
                 continue;
             };
 
-            let player_class = player.class_name();
             let weapon_name = state.get_player_weapon(player);
             if is_excluded_weapon(&weapon_name) {
                 continue;
@@ -305,7 +379,7 @@ impl CheatAlgorithm for Psilent5 {
             self.pending.push(LaunchCandidate {
                 tick,
                 player: owner_steam_id,
-                player_class,
+                player_class: player.class,
                 weapon_name,
                 player_ping: player.ping,
                 projectile: class.to_string(),
@@ -326,17 +400,7 @@ impl CheatAlgorithm for Psilent5 {
         let resolved = self.resolve_pending(u32::MAX, true);
         self.tentative.extend(resolved);
 
-        let mut unique = HashMap::<(SteamID, u32, u32), TentativeDetection>::new();
-        for tentative in self.tentative.drain(..) {
-            let key = (tentative.detection.player, tentative.projectile_entity, tentative.serial);
-            let new_delta = detection_delta(&tentative.detection);
-            match unique.get(&key) {
-                Some(existing) if detection_delta(&existing.detection) >= new_delta => {}
-                _ => {
-                    unique.insert(key, tentative);
-                }
-            }
-        }
+        let unique = get_unique_tentative_detections(std::mem::take(&mut self.tentative));
 
         let minimum_launches = self.params.minimum_suspicious_launches;
         let mut launch_counts = HashMap::<SteamID, usize>::new();
@@ -344,19 +408,35 @@ impl CheatAlgorithm for Psilent5 {
             *launch_counts.entry(*player).or_default() += 1;
         }
 
-        // Emit if minimum suspicious launches met OR if blatant high-delta single shot (>= 25.0 deg)
+        // Emit if minimum suspicious launches met OR if blatant high-delta single shot
         let mut detections: Vec<_> = unique
             .into_values()
+            .into_iter()
             .filter(|tentative| {
-                let delta = detection_delta(&tentative.detection);
-                delta >= 25.0 || launch_counts.get(&tentative.detection.player).is_some_and(|count| *count >= minimum_launches)
+                let delta = tentative.compensated_angle_delta;
+                delta >= self.params.angle_threshold_blatant || launch_counts.get(&tentative.player).is_some_and(|count| *count >= minimum_launches)
             })
-            .map(|tentative| tentative.detection)
+            .map(Detection::from)
             .collect();
         // TODO: check if sorting is necessary
         detections.sort_by_key(|detection| (detection.tick, u64::from(detection.player)));
         Ok(detections)
     }
+}
+
+fn get_unique_tentative_detections(tentative_detections: Vec<TentativeDetection>) -> KeyValueVec<(SteamID, u32, u32), TentativeDetection> {
+    let mut unique = KeyValueVec::<(SteamID, u32, u32), TentativeDetection>::new();
+    for tentative in tentative_detections.into_iter() {
+        let key = (tentative.player, tentative.projectile_entity, tentative.projectile_serial);
+        let new_delta = tentative.compensated_angle_delta;
+        match unique.get(&key) {
+            Some(existing) if existing.compensated_angle_delta >= new_delta => {}
+            _ => {
+                _ = unique.insert(key, tentative);
+            }
+        }
+    }
+    unique
 }
 
 fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque<PlayerSnapshot>>, candidate: LaunchCandidate) -> Option<TentativeDetection> {
@@ -365,7 +445,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         return None;
     }
 
-    let angle_threshold = params.angle_threshold;
+    let angle_threshold = params.angle_threshold_suspicious;
     let lookaround_ticks = params.lookaround_ticks;
     let minimum_samples = params.minimum_samples;
     let history = histories.get(&candidate.player)?;
@@ -397,7 +477,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
         }
     }
 
-    let launch_angles = vector_angles(candidate.launch_direction);
+    let launch_angles = ViewAngle::from(candidate.launch_direction);
     let speed = candidate.initial_velocity.length();
     let is_pipebomb = candidate.projectile == "CTFGrenadePipebombProjectile";
 
@@ -467,7 +547,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                 } else {
                     v_view
                 };
-                let direct_angles = vector_angles(expected_direct);
+                let direct_angles = ViewAngle::from(expected_direct);
                 let direct_delta = direct_angles.world_angle_delta(launch_angles);
                 if direct_delta < compensated_delta {
                     compensated_delta = direct_delta;
@@ -499,7 +579,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                                     expected_dir = n;
                                 }
                             }
-                            let expected_angles = vector_angles(expected_dir);
+                            let expected_angles = ViewAngle::from(expected_dir);
                             let delta = launch_angles.world_angle_delta(expected_angles);
                             if delta < compensated_delta {
                                 compensated_delta = delta;
@@ -531,7 +611,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                                     expected_dir = n;
                                 }
                             }
-                            let expected_angles = vector_angles(expected_dir);
+                            let expected_angles = ViewAngle::from(expected_dir);
                             let delta = launch_angles.world_angle_delta(expected_angles);
                             if delta < compensated_delta {
                                 compensated_delta = delta;
@@ -561,7 +641,7 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
                                 expected_dir = n;
                             }
                         }
-                        let expected_angles = vector_angles(expected_dir);
+                        let expected_angles = ViewAngle::from(expected_dir);
                         let delta = launch_angles.world_angle_delta(expected_angles);
                         if delta < compensated_delta {
                             compensated_delta = delta;
@@ -584,40 +664,36 @@ fn evaluate_candidate(params: &Parameters, histories: &HashMap<SteamID, VecDeque
     let yaw_diff = (launch_angles.yaw - best_view.yaw).rem_euclid(360.0);
     let yaw_delta = if yaw_diff > 180.0 { 360.0 - yaw_diff } else { yaw_diff };
     let pitch_delta = (launch_angles.pitch - best_view.pitch).abs();
+    let view_angle_delta = ViewAngleDelta {
+        yaw: yaw_delta,
+        pitch: pitch_delta,
+    };
 
     Some(TentativeDetection {
+        player: candidate.player,
+        tick: candidate.tick,
+        class: candidate.player_class,
+        weapon_name: candidate.weapon_name,
+        projectile_name: candidate.projectile,
         projectile_entity: candidate.projectile_entity,
-        serial: candidate.serial,
-        detection: Detection {
-            tick: candidate.tick,
-            algorithm: Psilent5::ALGORITHM_NAME,
-            player: candidate.player,
-            data: json!({
-                "class": candidate.player_class,
-                "weapon": candidate.weapon_name,
-                "projectile": candidate.projectile,
-                "projectile_entity": candidate.projectile_entity,
-                "projectile_serial": candidate.serial,
-                "origin": candidate.origin,
-                "initial_velocity": candidate.initial_velocity,
-                "launch_angles": launch_angles,
-                "view_angles": best_view,
-                "view_tick": best_tick,
-                "raw_angle_delta": raw_delta,
-                "compensated_angle_delta": compensated_delta,
-                "yaw_delta": yaw_delta,
-                "pitch_delta": pitch_delta,
-                "owner_distance": candidate.owner_distance,
-                "pipe_type": candidate.pipe_type,
-                "samples": samples.len(),
-            }),
-        },
+        projectile_serial: candidate.serial,
+        origin: candidate.origin,
+        initial_velocity: candidate.initial_velocity,
+        launch_angle: launch_angles,
+        view_angle: best_view,
+        view_tick: best_tick,
+        raw_angle_delta: raw_delta,
+        compensated_angle_delta: compensated_delta,
+        view_angle_delta,
+        owner_distance: candidate.owner_distance,
+        pipe_type: candidate.pipe_type,
+        sample_count: samples.len(),
     })
 }
 
-fn detection_delta(detection: &Detection) -> f64 {
-    detection.data["compensated_angle_delta"].as_f64().unwrap_or_default()
-}
+// fn detection_delta(detection: &TentativeDetection) -> f32 {
+//     detection.compensated_angle_delta
+// }
 
 fn is_excluded_weapon(weapon_name: &str) -> bool {
     weapon_name.contains("Beggar") || weapon_name.contains("Rocket Jumper") || weapon_name.contains("Sticky Jumper")
@@ -771,15 +847,8 @@ fn normalized(vector: Vec3) -> Option<Vec3> {
     })
 }
 
-fn vector_angles(vector: Vec3) -> ViewAngle {
-    let horizontal = (vector.x * vector.x + vector.y * vector.y).sqrt();
-    ViewAngle {
-        yaw: vector.y.atan2(vector.x).to_degrees(),
-        pitch: (-vector.z).atan2(horizontal).to_degrees(),
-    }
-}
-
-// TODO: maybe move to method inside `ViewAngle`
+/// get the Vec3 that is ViewAngle.pitch + 90°
+// TODO: maybe move to method inside `ViewAngle` or remove.
 fn angles_to_up_vector(viewangle: ViewAngle) -> Vec3 {
     let yaw_rad = viewangle.yaw.to_radians();
     let pitch_rad = viewangle.pitch.to_radians();
@@ -790,17 +859,38 @@ fn angles_to_up_vector(viewangle: ViewAngle) -> Vec3 {
     }
 }
 
+impl From<TentativeDetection> for Detection {
+    fn from(value: TentativeDetection) -> Self {
+        let data = json!({
+            "class": &value.class.to_string(),
+            "weapon": &value.weapon_name,
+            "projectile": &value.projectile_name,
+            "projectile_entity": &value.projectile_entity,
+            "projectile_serial": &value.projectile_serial,
+            "origin": &value.origin,
+            "initial_velocity": &value.initial_velocity,
+            "launch_angle": &value.launch_angle,
+            "view_angle": &value.view_angle,
+            "view_tick": &value.view_tick,
+            "raw_angle_delta": &value.raw_angle_delta,
+            "compensated_angle_delta": &value.compensated_angle_delta,
+            "view_angle_delta": &value.view_angle_delta,
+            "owner_distance": &value.owner_distance,
+            "pipe_type": &value.pipe_type,
+            "sample_count": &value.sample_count,
+        });
+        Detection {
+            tick: value.tick,
+            algorithm: Psilent5::ALGORITHM_NAME,
+            player: value.player,
+            data,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_angles_roundtrip() {
-        let dir = ViewAngle { yaw: 45.0, pitch: 15.0 }.to_unit_vec();
-        let ViewAngle { yaw, pitch } = vector_angles(dir);
-        assert!((yaw - 45.0).abs() < 0.01);
-        assert!((pitch - 15.0).abs() < 0.01);
-    }
 
     #[test]
     fn test_forward_up_orthogonality() {
