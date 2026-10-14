@@ -30,8 +30,9 @@ pub mod algorithms {
         pub mod duckspeed;
         pub mod invalid_equip_region;
         pub mod nospread;
-        pub mod psilent4;
+        pub mod plain_aimbot;
         pub mod psilent5;
+        pub mod pyro_aimbot;
         pub mod silent_aim;
     }
 }

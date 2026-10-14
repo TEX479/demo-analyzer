@@ -3,7 +3,7 @@ pub use crate::algorithms::{
     all_messages::AllMessages,
     fidoo::{
         auto_backstab::AutoBackstab, bunnyhop::BunnyHop, duckspeed::CrouchSpeed, invalid_equip_region::InvalidEquipRegion, nospread::NoSpread,
-        psilent4::Psilent4, psilent5::Psilent5, silent_aim::SilentAim,
+        psilent5::Psilent5, silent_aim::SilentAim,
     },
     nocrex::{aimsnap::AimSnap, angle_repeat::AngleRepeat, oob_pitch::OOBPitch},
     teltta::{angle_history::AngleHistory, backtrack::BackTrack, double_tap::DoubleTap},
@@ -13,7 +13,12 @@ pub use crate::algorithms::{
 };
 
 use crate::{
-    algorithms::tex::info_logger::Logger, base::cheat_analyser_base::CheatAnalyserState, lib::parameters::AlgorithmParameters,
+    algorithms::{
+        fidoo::{plain_aimbot::PlainAimbot, pyro_aimbot::PyroAimbot},
+        tex::info_logger::Logger,
+    },
+    base::cheat_analyser_base::CheatAnalyserState,
+    lib::parameters::AlgorithmParameters,
     util::nocrex::jankguard::JankGuard,
 };
 use anyhow::Error;
@@ -54,11 +59,12 @@ pub fn get_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
         Box::new(AutoBackstab::new()),
         Box::new(InvalidEquipRegion::new()),
         Box::new(NoSpread::new()),
-        Box::new(Psilent4::new()),
         Box::new(Psilent5::new()),
         Box::new(SilentAim::new()),
         Box::new(CrouchSpeed::new()),
         Box::new(BunnyHop::new()),
+        Box::new(PyroAimbot::new()),
+        Box::new(PlainAimbot::new()),
         // tex' algorithms
         Box::new(Logger::default()),
     ]
