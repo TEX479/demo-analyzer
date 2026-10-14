@@ -387,6 +387,37 @@ impl Vec3 {
     pub fn is_nan(&self) -> bool {
         self.x.is_nan() || self.y.is_nan() || self.z.is_nan()
     }
+
+    // TODO: test more
+    /// gets the angle between self and rhs
+    ///
+    /// # Example
+    /// ```
+    /// # use analysis_template::util::helpers::geometry::Vec3;
+    /// let v1 = Vec3 { x: 2.0, y: 0.0, z: 0.0 };
+    /// let v2 = Vec3 { x: 2.0, y: 0.0, z: 0.0 };
+    /// assert_eq!(v1.angle_between(v2), 0.0);
+    ///
+    /// let v1 = Vec3 { x: 2.0, y: 0.0, z: 0.0 };
+    /// let v2 = Vec3 { x: -2.0, y: 0.0, z: 0.0 };
+    /// assert!(floats_are_equal(v1.angle_between(v2).abs(), 180.0));
+    ///
+    /// let v1 = Vec3 { x: 2.0, y: 0.0, z: 0.0 };
+    /// let v2 = Vec3 { x: 0.0, y: 2.0, z: 0.0 };
+    /// assert!(floats_are_equal(v1.angle_between(v2).abs(), 90.0));
+    ///
+    /// // since floating point operations have rounding, compare using some epsilon
+    /// const EPSILON: f32 = 0.00001;
+    /// fn floats_are_equal(f1: f32, f2: f32) -> bool {
+    ///     -EPSILON < f1 - f2 && f1 - f2 < EPSILON
+    /// }
+    /// ```
+    pub fn angle_between(self, rhs: Self) -> f32 {
+        (self.dot(rhs) / (self.length_square() * rhs.length_square()).sqrt())
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees()
+    }
 }
 
 impl ViewAngleDelta {
@@ -614,18 +645,6 @@ impl From<Vec3> for tf_demo_parser::demo::vector::Vector {
         Self { x, y, z }
     }
 }
-
-/*
-impl TryFrom<Vec3> for ViewAngle {
-    // TODO: get some real error type
-    type Error = ();
-
-    fn try_from(value: Vec3) -> Result<Self, Self::Error> {
-        // TODO: implement
-        todo!()
-    }
-}
-// */
 
 impl From<Vec3> for ViewAngle {
     /// gets the viewangle along the provided `Vec3`

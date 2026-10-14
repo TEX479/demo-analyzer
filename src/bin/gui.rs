@@ -73,9 +73,9 @@ impl Gui {
     }
 
     fn analyse(&mut self) {
-        if self.file.is_none() {
+        let Some(file) = self.file.as_ref() else {
             return;
-        }
+        };
         self.selected_detection = None;
         self.selected_player = None;
         let mut algorithms = get_algorithms();
@@ -89,16 +89,20 @@ impl Gui {
             }
         }
 
-        let file = self.file.clone().unwrap();
+        let file = file.to_owned();
         let send = self.send.clone();
 
         std::thread::spawn(move || {
-            send.send((|| -> anyhow::Result<CheatAnalyser> {
+            match send.send((|| -> anyhow::Result<CheatAnalyser> {
                 let file = std::fs::read(&file)?;
                 let demo: Demo = Demo::new(&file);
                 analyse(&demo, algorithms)
-            })())
-            .unwrap();
+            })()) {
+                Ok(_) => (),
+                Err(e) => {
+                    tracing::error!("error while parsing file {:?}: {:?}", file, e);
+                }
+            };
         });
         self.processing = true;
     }
@@ -132,16 +136,21 @@ impl eframe::App for Gui {
             if self.processing {
                 ui.disable();
                 if let Ok(result) = self.recv.try_recv() {
-                    if let Err(e) = &result {
-                        println!("Error while parsing demo: {e:#?}");
-                    }
-                    self.analyser = result.ok();
+                    let analyser = match result {
+                        Ok(x) => x,
+                        Err(e) => {
+                            tracing::error!("Error while parsing demo: {e:#?}");
+                            self.analyser = None;
+                            return;
+                        }
+                    };
                     self.processing = false;
                     self.detections.clear();
-                    for det in self.analyser.as_ref().unwrap().detections.clone() {
+                    for det in analyser.detections.clone() {
                         self.detections.entry(det.player).or_default().push(det);
                     }
-                    self.analyser.as_ref().unwrap().print_detection_summary();
+                    analyser.print_detection_summary();
+                    self.analyser = Some(analyser);
                 }
             }
             ui.horizontal(|ui| {
@@ -165,7 +174,11 @@ impl eframe::App for Gui {
                         ui.horizontal(|ui| {
                             ui.heading("Parameters");
                             if ui.button("Save").clicked() {
-                                std::fs::write("params.json", serde_json::to_vec_pretty(&self.config).unwrap()).unwrap();
+                                std::fs::write(
+                                    "params.json",
+                                    serde_json::to_vec_pretty(&self.config).expect("could not convert config to json"), // TODO: replace expect with error logging
+                                )
+                                .expect("could not write config to 'params.json'"); // TODO: replace expect with error logging
                             }
                         });
                         ui.separator();
@@ -228,7 +241,13 @@ impl eframe::App for Gui {
                             "map": a.header.as_ref().map_or("unknown".to_string(), |h| h.map.clone()),
                             "detections": a.detections
                         });
-                        std::fs::write(path, serde_json::to_vec_pretty(&analysis).unwrap()).unwrap();
+                        match serde_json::to_vec_pretty(&analysis) {
+                            Ok(value) => match std::fs::write(&path, &value) {
+                                Ok(_) => tracing::info!("successfully saved detections to file"),
+                                Err(e) => tracing::error!("could not save detections to file ({path:?}): {e:#?}"),
+                            },
+                            Err(e) => tracing::error!("could not convert detections to json: {e:#?}"),
+                        }
                     }
                 });
             });
@@ -247,7 +266,7 @@ impl eframe::App for Gui {
             }
             ui.add_space(10.0);
             if let Some(p) = &self.file {
-                ui.heading(p.file_name().unwrap().to_string_lossy());
+                ui.heading(p.file_name().expect("only valid files should be selectable").to_string_lossy());
                 ui.label("Doubleclick steamid to open profile");
             }
             ui.separator();
@@ -293,7 +312,7 @@ impl eframe::App for Gui {
                         .and_then(|p| self.detections.get(&p))
                         .and_then(|dets| self.selected_detection.and_then(|di| dets.get(di)))
                     {
-                        ui.label(serde_json::to_string_pretty(&det.data).unwrap());
+                        ui.label(serde_json::to_string_pretty(&det.data).expect("detection data should be valid json"));
                     }
                 });
             });

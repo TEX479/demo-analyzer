@@ -182,7 +182,7 @@ impl DemoFileManager {
             Vec::new()
         };
 
-        if !detections.is_empty() && crate::PRINT_DETECTIONS_LIVE.load(std::sync::atomic::Ordering::Relaxed) {
+        if !detections.is_empty() {
             for detection in detections.iter() {
                 let player_string = match get_player_name(&demo_file.handler.analyser.state, detection.player) {
                     Some(name) => format!("{}/{} ({:?})", u64::from(detection.player), detection.player.steam3(), name),

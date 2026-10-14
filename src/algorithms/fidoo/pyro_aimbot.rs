@@ -23,19 +23,23 @@
 // Eye angles of other players are networked with ~0.35° precision and only change when the player's
 // simulation time advances, so all checks run on simtime samples.
 
+// TODO: refactor more
+
 use std::collections::{HashMap, VecDeque};
 
 use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
+use tf_demo_parser::ParserState;
 use tf_demo_parser::demo::gamevent::GameEvent;
 use tf_demo_parser::demo::message::{GameEventMessage, Message};
-use tf_demo_parser::demo::vector::Vector;
-use tf_demo_parser::{MessageType, ParserState};
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
+use crate::util::helpers::player_finders::valid_players;
+use crate::util::helpers::{Vec3, ViewAngle};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const SAMPLE_HISTORY: usize = 8;
@@ -55,13 +59,14 @@ const BODY_BOTTOM: f32 = 5.0;
 const BODY_TOP_STANDING: f32 = 80.0;
 const BODY_TOP_DUCKING: f32 = 60.0;
 
+type Tick = u32;
+
 #[derive(Clone, Copy, Debug)]
 struct Sample {
-    tick: u32,
+    tick: Tick,
     sim_tick: i64,
-    yaw: f32,
-    pitch: f32,
-    eye: Vector,
+    view_angle: ViewAngle,
+    eye: Vec3,
     team: u8,
     /// Holds a flame thrower and is not taunting / spawning
     flame: bool,
@@ -69,8 +74,8 @@ struct Sample {
 
 #[derive(Clone, Copy)]
 struct PositionRecord {
-    tick: u32,
-    position: Vector,
+    tick: Tick,
+    position: Vec3,
     team: u8,
     ducking: bool,
 }
@@ -94,40 +99,79 @@ struct PlayerData {
 #[derive(Default)]
 pub struct PyroAimbot {
     params: Parameters,
-    jg: JankGuard,
-    players: HashMap<u64, PlayerData>,
+    players: HashMap<SteamID, PlayerData>,
     /// Flame thrower damage dealt per attacker: (tick, victim)
-    flame_hits: HashMap<u64, VecDeque<(u32, u64)>>,
+    flame_hits: HashMap<SteamID, VecDeque<(Tick, SteamID)>>,
 }
 
-fn view_dir(yaw: f32, pitch: f32) -> (f32, f32, f32) {
-    let (y, p) = (yaw.to_radians(), pitch.to_radians());
-    (p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    spawn_grace_ticks: u32,
+    max_sample_gap: u32,
+    max_simtime_gap: u32,
+    min_step: f32,
+    max_step: f32,
+    min_speed: f32,
+    min_anchored_speed: f32,
+    max_anchor_error: f32,
+    min_oscillation_speed: f32,
+    oscillation_max_return: f32,
+    oscillation_max_return_rel: f32,
+    max_enemies_in_range: usize,
+    fast_max_return: f32,
+    min_turn: f32,
+    max_distance: f32,
+    max_target_angle: f32,
+    require_hit: bool,
+    hit_window_ticks: u32,
+    max_lag_ticks: u32,
+    min_detection_spacing: u32,
 }
 
-fn angle_between(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
-    let la = (a.0 * a.0 + a.1 * a.1 + a.2 * a.2).sqrt();
-    let lb = (b.0 * b.0 + b.1 * b.1 + b.2 * b.2).sqrt();
-    if la < 1e-6 || lb < 1e-6 {
-        return 180.0;
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            spawn_grace_ticks: 60,
+            max_sample_gap: 3,
+            max_simtime_gap: 4,
+            min_step: 4.0,
+            max_step: 120.0,
+            min_speed: 10.0,
+            min_anchored_speed: 1.0,
+            max_anchor_error: 1.0,
+            min_oscillation_speed: 5.0,
+            oscillation_max_return: 10.0,
+            oscillation_max_return_rel: 0.7,
+            max_enemies_in_range: 2,
+            fast_max_return: 20.0,
+            min_turn: 100.0,
+            max_distance: 400.0,
+            max_target_angle: 35.0,
+            require_hit: true,
+            hit_window_ticks: 12,
+            max_lag_ticks: 16,
+            min_detection_spacing: 66,
+        }
     }
-    let cross = (a.1 * b.2 - a.2 * b.1, a.2 * b.0 - a.0 * b.2, a.0 * b.1 - a.1 * b.0);
-    let c = (cross.0 * cross.0 + cross.1 * cross.1 + cross.2 * cross.2).sqrt();
-    let d = a.0 * b.0 + a.1 * b.1 + a.2 * b.2;
-    c.atan2(d).to_degrees()
 }
 
 fn view_step(a: &Sample, b: &Sample) -> f32 {
-    angle_between(view_dir(a.yaw, a.pitch), view_dir(b.yaw, b.pitch))
+    // TODO: maybe replace with ViewAngle's world_delta
+    a.view_angle.to_unit_vec().angle_between(b.view_angle.to_unit_vec())
 }
 
+// TODO: check if this wraps correctly / if it can be ignored
 fn wrap(a: f32) -> f32 {
     (a + 180.0).rem_euclid(360.0) - 180.0
 }
 
-fn eye_position(player: &Player) -> Vector {
+fn eye_position(player: &Player) -> Vec3 {
     let height = if player.flags & FL_DUCKING != 0 { 45.0 } else { 68.0 };
-    Vector { x: player.position.x, y: player.position.y, z: player.position.z + height }
+    Vec3 {
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z + height,
+    }
 }
 
 /// Position of a player at `tick`, linearly interpolated between records.
@@ -148,7 +192,7 @@ fn position_at(positions: &VecDeque<PositionRecord>, tick: i64) -> Option<Positi
     let f = (tick - older.tick as i64) as f32 / span as f32;
     Some(PositionRecord {
         tick: tick as u32,
-        position: Vector {
+        position: Vec3 {
             x: older.position.x + (newer.position.x - older.position.x) * f,
             y: older.position.y + (newer.position.y - older.position.y) * f,
             z: older.position.z + (newer.position.z - older.position.z) * f,
@@ -159,18 +203,18 @@ fn position_at(positions: &VecDeque<PositionRecord>, tick: i64) -> Option<Positi
 }
 
 /// Angular error between the view ray and the closest point of the target's body column.
-fn column_error(eye: Vector, yaw: f32, pitch: f32, target: Vector, top: f32) -> f32 {
-    let dir = view_dir(yaw, pitch);
+fn column_error(eye: Vec3, view_angle: ViewAngle, target: Vec3, top: f32) -> f32 {
+    let dir = view_angle.to_unit_vec();
     let dx = target.x - eye.x;
     let dy = target.y - eye.y;
     let horizontal = dx.hypot(dy);
-    let dir_h = dir.0.hypot(dir.1);
+    let dir_h = dir.x.hypot(dir.y);
     if horizontal < 16.0 || dir_h < 1e-4 {
         return 180.0;
     }
-    let ray_z = eye.z + dir.2 / dir_h * horizontal;
+    let ray_z = eye.z + dir.z / dir_h * horizontal;
     let z = ray_z.clamp(target.z + BODY_BOTTOM, target.z + top);
-    angle_between(dir, (dx, dy, z - eye.z))
+    dir.angle_between(Vec3 { x: dx, y: dy, z: z - eye.z })
 }
 
 /// Smallest aim error of a sample against a target seen `0..=max_lag` ticks ago, aimed at directly
@@ -190,39 +234,14 @@ fn aim_error(sample: &Sample, positions: &VecDeque<PositionRecord>, max_lag: u32
             target.x += (rec.position.x - older.position.x) / span * flight;
             target.y += (rec.position.y - older.position.y) / span * flight;
         }
-        best = best.min(column_error(sample.eye, sample.yaw, sample.pitch, target, top));
+        best = best.min(column_error(sample.eye, sample.view_angle, target, top));
     }
     best
 }
 
 impl PyroAimbot {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                ("spawn_grace_ticks".to_string(), Parameter::Int(60)),
-                ("max_sample_gap".to_string(), Parameter::Int(3)),
-                ("max_simtime_gap".to_string(), Parameter::Int(4)),
-                ("min_step".to_string(), Parameter::Float(4.0)),
-                ("max_step".to_string(), Parameter::Float(120.0)),
-                ("min_speed".to_string(), Parameter::Float(10.0)),
-                ("min_anchored_speed".to_string(), Parameter::Float(8.0)),
-                ("max_anchor_error".to_string(), Parameter::Float(1.0)),
-                ("min_oscillation_speed".to_string(), Parameter::Float(5.0)),
-                ("oscillation_max_return".to_string(), Parameter::Float(10.0)),
-                ("oscillation_max_return_rel".to_string(), Parameter::Float(0.7)),
-                ("max_enemies_in_range".to_string(), Parameter::Int(2)),
-                ("fast_max_return".to_string(), Parameter::Float(20.0)),
-                ("min_turn".to_string(), Parameter::Float(100.0)),
-                ("max_distance".to_string(), Parameter::Float(400.0)),
-                ("max_target_angle".to_string(), Parameter::Float(35.0)),
-                ("require_hit".to_string(), Parameter::Bool(true)),
-                ("hit_window_ticks".to_string(), Parameter::Int(12)),
-                ("max_lag_ticks".to_string(), Parameter::Int(16)),
-                ("min_detection_spacing".to_string(), Parameter::Int(66)),
-            ]),
-            ..Default::default()
-        }
+        Self::default()
     }
 
     fn reset(pdata: &mut PlayerData) {
@@ -232,6 +251,7 @@ impl PyroAimbot {
     }
 }
 
+/*
 struct Settings {
     spawn_grace: u32,
     max_sample_gap: u32,
@@ -283,10 +303,38 @@ impl Settings {
         }
     }
 }
+// */
+
+impl<'a> From<&'a mut Parameters> for AlgorithmParameters<'a> {
+    fn from(value: &'a mut Parameters) -> Self {
+        make_algorithm_params!(value; [
+            spawn_grace_ticks,
+            max_sample_gap,
+            max_simtime_gap,
+            min_step,
+            max_step,
+            min_speed,
+            min_anchored_speed,
+            max_anchor_error,
+            min_oscillation_speed,
+            oscillation_max_return,
+            oscillation_max_return_rel,
+            max_enemies_in_range,
+            fast_max_return,
+            min_turn,
+            max_distance,
+            max_target_angle,
+            require_hit,
+            hit_window_ticks,
+            max_lag_ticks,
+            min_detection_spacing,
+        ])
+    }
+}
 
 /// An enemy that can be aimed at, with its recent position records.
 struct Target<'p> {
-    sid: u64,
+    sid: SteamID,
     positions: &'p VecDeque<PositionRecord>,
 }
 
@@ -294,18 +342,21 @@ impl PyroAimbot {
     /// Corner shape of X -> Y -> Z: both steps (yaw scaled to arc length) and the turn between them
     /// are large. Returns (step1, step2, turn, speed), speed being the slower step in degrees per
     /// simulated tick (choked usercmds cover several ticks).
-    fn corner_shape(cfg: &Settings, x: &Sample, y: &Sample, z: &Sample) -> Option<(f32, f32, f32, f32)> {
+    fn corner_shape(cfg: &Parameters, x: &Sample, y: &Sample, z: &Sample) -> Option<(f32, f32, f32, f32)> {
         if !(x.flame && y.flame && z.flame) {
             return None;
         }
         for (p, q) in [(x, y), (y, z)] {
-            if q.tick - p.tick > cfg.max_sample_gap || !(1..=cfg.max_simtime_gap).contains(&(q.sim_tick - p.sim_tick)) {
+            if q.tick - p.tick > cfg.max_sample_gap || !(1..=cfg.max_simtime_gap as i64).contains(&(q.sim_tick - p.sim_tick)) {
                 return None;
             }
         }
         let step = |p: &Sample, q: &Sample| {
-            let dyaw = wrap(q.yaw - p.yaw);
-            (dyaw * ((p.pitch + q.pitch) * 0.5).to_radians().cos(), q.pitch - p.pitch)
+            let dyaw = wrap(q.view_angle.yaw - p.view_angle.yaw);
+            (
+                dyaw * ((p.view_angle.pitch + q.view_angle.pitch) * 0.5).to_radians().cos(),
+                q.view_angle.pitch - p.view_angle.pitch,
+            )
         };
         let (v1, v2) = (step(x, y), step(y, z));
         let (m1, m2) = (v1.0.hypot(v1.1), v2.0.hypot(v2.1));
@@ -321,7 +372,7 @@ impl PyroAimbot {
     }
 
     /// Sharp corner A -> B -> C over the samples before the newest one (D) while engaging an enemy.
-    fn check_corner(cfg: &Settings, samples: &VecDeque<Sample>, targets: &[Target]) -> Option<serde_json::Value> {
+    fn check_corner(cfg: &Parameters, samples: &VecDeque<Sample>, targets: &[Target]) -> Option<serde_json::Value> {
         let n = samples.len();
         if n < 4 {
             return None;
@@ -344,7 +395,7 @@ impl PyroAimbot {
                 continue;
             }
             in_range += 1;
-            let off = wrap(b.yaw - dy.atan2(dx).to_degrees()).abs();
+            let off = wrap(b.view_angle.yaw - dy.atan2(dx).to_degrees()).abs();
             if off > cfg.max_target_angle {
                 continue;
             }
@@ -358,7 +409,10 @@ impl PyroAimbot {
         }
         let (target, distance, off) = engaged?;
         let errors = |s: &Sample| {
-            (aim_error(s, target.positions, cfg.max_lag, false), aim_error(s, target.positions, cfg.max_lag, true))
+            (
+                aim_error(s, target.positions, cfg.max_lag_ticks, false),
+                aim_error(s, target.positions, cfg.max_lag_ticks, true),
+            )
         };
         let (err_a, lead_a) = errors(a);
         let (err_b, lead_b) = errors(b);
@@ -369,16 +423,14 @@ impl PyroAimbot {
         let returned = view_step(a, c);
         // Oscillation: the neighbouring sample is a corner too (aim, real, aim, ...), and the view
         // returns close to where it was
-        let train = before.is_some_and(|x| Self::corner_shape(cfg, x, a, b).is_some())
-            || Self::corner_shape(cfg, b, c, d).is_some();
+        let train = before.is_some_and(|x| Self::corner_shape(cfg, x, a, b).is_some()) || Self::corner_shape(cfg, b, c, d).is_some();
         let oscillation = train
             && anchored
             && speed >= cfg.min_oscillation_speed
             && (returned <= cfg.oscillation_max_return || returned <= cfg.oscillation_max_return_rel * m1.max(m2));
         // Fast corner: the view comes back close to where it was. A legit swing through a fight
         // reverses only part of the way.
-        let fast = (speed >= cfg.min_speed || (anchored && speed >= cfg.min_anchored_speed))
-            && returned <= cfg.fast_max_return;
+        let fast = (speed >= cfg.min_speed || (anchored && speed >= cfg.min_anchored_speed)) && returned <= cfg.fast_max_return;
         if !oscillation && !fast {
             return None;
         }
@@ -404,7 +456,7 @@ impl PyroAimbot {
     }
 
     /// Ticks from the corner to the closest flame hit of `attacker` within the hit window.
-    fn hit_offset(&self, attacker: u64, corner_tick: u32, window: u32) -> Option<i64> {
+    fn hit_offset(&self, attacker: SteamID, corner_tick: u32, window: u32) -> Option<i64> {
         self.flame_hits
             .get(&attacker)?
             .iter()
@@ -414,71 +466,55 @@ impl PyroAimbot {
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for PyroAimbot {
-    fn default(&self) -> bool {
+impl CheatAlgorithm for PyroAimbot {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "fidoo/pyro_aimbot"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
-    }
-
-    fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
-        self.jg.handled_messages()
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        Some(AlgorithmParameters::from(&mut self.params))
     }
 
     fn on_message(
         &mut self,
         message: &Message,
         state: &CheatAnalyserState,
-        parser_state: &ParserState,
+        _parser_state: &ParserState,
+        _jg: &JankGuard,
         tick: tf_demo_parser::demo::data::DemoTick,
     ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
-        if let Message::GameEvent(GameEventMessage { event: GameEvent::PlayerHurt(hurt), .. }) = message {
-            if hurt.weapon_id == WEAPON_ID_FLAMETHROWER && hurt.attacker != hurt.user_id {
-                if let (Some(attacker), Some(victim)) = (
-                    state.get_id64_from_userid(hurt.attacker.into()),
-                    state.get_id64_from_userid(hurt.user_id.into()),
-                ) {
-                    let hits = self.flame_hits.entry(attacker).or_default();
-                    hits.push_back((u32::from(tick), victim));
-                    if hits.len() > HURT_HISTORY {
-                        hits.pop_front();
-                    }
-                }
+        if let Message::GameEvent(GameEventMessage {
+            event: GameEvent::PlayerHurt(hurt),
+            ..
+        }) = message
+            && hurt.weapon_id == WEAPON_ID_FLAMETHROWER
+            && hurt.attacker != hurt.user_id
+            && let (Some(attacker), Some(victim)) = (
+                state.get_steamid_from_userid(hurt.attacker.into()),
+                state.get_steamid_from_userid(hurt.user_id.into()),
+            )
+        {
+            let hits = self.flame_hits.entry(attacker).or_default();
+            hits.push_back((u32::from(tick), victim));
+            if hits.len() > HURT_HISTORY {
+                hits.pop_front();
             }
         }
         Ok(vec![])
     }
 
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
-        if !get_parameter_value::<bool>(&self.params, "enabled") {
-            return Ok(vec![]);
-        }
-        let cfg = Settings::from(&self.params);
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
+        let cfg = &self.params;
         let tick = u32::from(state.tick);
 
         // 1. Record positions and new eye angle samples
-        let mut updated: Vec<u64> = Vec::new();
-        let mut by_sid: HashMap<u64, &Player> = HashMap::new();
-        for player in &state.players {
-            let Some(info) = &player.info else { continue };
-            if info.steam_id == "BOT" {
-                continue;
-            }
-            let Ok(sid) = SteamID::from_steam3(&info.steam_id).map(u64::from) else { continue };
-            let live = |p: &Player| p.in_pvs && p.state == PlayerState::Alive;
-            if by_sid.get(&sid).is_none_or(|old| !live(old) && live(player)) {
-                by_sid.insert(sid, player);
-            }
-        }
-        for (&sid, player) in &by_sid {
+        let mut updated: Vec<SteamID> = Vec::new();
+
+        for (player, _info, sid) in valid_players(state.players.iter()) {
             let pdata = self.players.entry(sid).or_default();
             if !player.in_pvs || player.state != PlayerState::Alive {
                 Self::reset(pdata);
@@ -517,15 +553,14 @@ impl<'a> CheatAlgorithm<'a> for PyroAimbot {
                 .active_weapon
                 .and_then(|w| state.weapons.get(&w))
                 .is_some_and(|w| w.class_name == "CTFFlameThrower");
-            let since_spawn = self.jg.spawned(&sid, tick).min(self.jg.teleported(&sid, tick));
+            let since_spawn = jg.spawned(&sid, tick).min(jg.teleported(&sid, tick));
             pdata.samples.push_back(Sample {
                 tick,
                 sim_tick,
-                yaw: player.view_angle,
-                pitch: player.pitch_angle,
+                view_angle: player.view_angle,
                 eye: eye_position(player),
                 team: player.team as u8,
-                flame: flame_thrower && since_spawn >= cfg.spawn_grace && !player.is_taunting(),
+                flame: flame_thrower && since_spawn >= cfg.spawn_grace_ticks && !player.is_taunting(),
             });
             if pdata.samples.len() > SAMPLE_HISTORY {
                 pdata.samples.pop_front();
@@ -544,7 +579,10 @@ impl<'a> CheatAlgorithm<'a> for PyroAimbot {
                 .iter()
                 .filter_map(|(s, d)| {
                     let r = d.positions.back()?;
-                    (r.team != team && tick.saturating_sub(r.tick) <= 8).then_some(Target { sid: *s, positions: &d.positions })
+                    (r.team != team && tick.saturating_sub(r.tick) <= 8).then_some(Target {
+                        sid: *s,
+                        positions: &d.positions,
+                    })
                 })
                 .collect();
             if let Some(data) = Self::check_corner(&cfg, &pdata.samples, &targets) {
@@ -557,22 +595,25 @@ impl<'a> CheatAlgorithm<'a> for PyroAimbot {
 
         // 3. Finalize corners once the flame hits after them have arrived
         let mut out = Vec::new();
-        let sids: Vec<u64> = self.players.iter().filter(|(_, d)| !d.pending.is_empty()).map(|(s, _)| *s).collect();
+        let sids: Vec<SteamID> = self.players.iter().filter(|(_, d)| !d.pending.is_empty()).map(|(s, _)| *s).collect();
         for sid in sids {
             loop {
                 let pdata = self.players.get_mut(&sid).unwrap();
                 let Some(front) = pdata.pending.front() else { break };
-                if tick < front.corner_tick + cfg.hit_window {
+                if tick < front.corner_tick + cfg.hit_window_ticks {
                     break;
                 }
                 let PendingCorner { corner_tick, mut data } = pdata.pending.pop_front().unwrap();
-                let hit = self.hit_offset(sid, corner_tick, cfg.hit_window);
+                let hit = self.hit_offset(sid, corner_tick, cfg.hit_window_ticks);
                 // Oscillations show the aim stream itself and need no hit
                 if cfg.require_hit && hit.is_none() && data["type"] == "corner" {
                     continue;
                 }
                 let pdata = self.players.get_mut(&sid).unwrap();
-                if pdata.last_detection.is_some_and(|last| corner_tick.saturating_sub(last) < cfg.spacing) {
+                if pdata
+                    .last_detection
+                    .is_some_and(|last| corner_tick.saturating_sub(last) < cfg.min_detection_spacing)
+                {
                     continue;
                 }
                 pdata.last_detection = Some(corner_tick);
@@ -580,7 +621,12 @@ impl<'a> CheatAlgorithm<'a> for PyroAimbot {
                 data["hit_offset_ticks"] = json!(hit);
                 data["class"] = json!(class);
                 data["weapon"] = json!(weapon);
-                out.push(Detection { tick: corner_tick, algorithm: "fidoo/pyro_aimbot".to_string(), player: sid, data });
+                out.push(Detection {
+                    tick: corner_tick,
+                    algorithm: self.algorithm_name(),
+                    player: sid,
+                    data,
+                });
             }
         }
         Ok(out)

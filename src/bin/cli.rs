@@ -69,11 +69,9 @@ fn main() -> Result<(), Error> {
         for algo in algorithms.iter_mut() {
             let algorithm_name: String = algo.algorithm_name().to_owned();
 
-            let algo_params = algo.params();
-            if algo_params.is_none() {
+            let Some(mut algo_params) = algo.params() else {
                 continue;
-            }
-            let mut algo_params = algo_params.unwrap();
+            };
             dev_print!("  {}", algorithm_name);
             if let Some(config_params) = config.get(&algorithm_name) {
                 tracing::info!("updating params for {}", algorithm_name);
@@ -88,6 +86,8 @@ fn main() -> Result<(), Error> {
         .into_iter()
         .filter(|a| algorithms.iter().all(|b| b.algorithm_name() != *a))
         .collect();
+
+    #[allow(clippy::panic)]
     if !unknown_algorithms.is_empty() {
         panic!("Unknown algorithms specified: {}", unknown_algorithms.join(", "));
     } else if algorithms.is_empty() {

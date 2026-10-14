@@ -1,11 +1,7 @@
 use analysis_template::{
     SILENT,
-    algorithms::tex::info_logger::Logger,
     lib::{
-        algorithm::{
-            AimSnap, AngleHistory, AngleRepeat, AutoBackstab, BackTrack, BunnyHop, CheatAlgorithm, CrouchSpeed, DoubleTap, NoSpread, OOBPitch, Psilent5,
-            SilentAim,
-        },
+        algorithm::{CheatAlgorithm, get_algorithms},
         parameters::{Config, try_update_algorithm_params},
     },
     live_analyzer::live_analysis,
@@ -61,36 +57,7 @@ fn locate_tf2_folder() -> anyhow::Result<PathBuf> {
 }
 
 fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
-    // let mut ah = AngleHistory::default();
-    // if let Some(params) = ah.params() {
-    //     *params = HashMap::from([
-    //         ("tick_window".to_string(), Parameter::Int(4)),
-    //         ("max_delta_first_third".to_string(), Parameter::Float(0.45)),
-    //         ("min_delta_second_third".to_string(), Parameter::Float(4.5)),
-    //     ]);
-    // }
-
-    let mut algos: Vec<Box<dyn CheatAlgorithm + Send>> = vec![
-        // logger for stuff like printing votes
-        Box::new(Logger::default()),
-        // actual algos:
-        Box::new(OOBPitch::new()),
-        Box::new(AimSnap::new()),
-        Box::new(BackTrack::new()),
-        Box::new(DoubleTap::new()),
-        Box::new(SilentAim::new()),
-        Box::new(BunnyHop::new()),
-        // AngleRepeat & AngleHistory are somewhat the same as SilentAim, but less elaborate
-        Box::new(AngleRepeat::new()),
-        Box::new(AngleHistory::default()),
-        Box::new(Psilent5::default()),
-        Box::new(CrouchSpeed::new()),
-        Box::new(NoSpread::new()),
-        // TODO: look over, refactor and add:
-        // - invalid_equip_region
-        // - autobackstab
-        Box::new(AutoBackstab::new()),
-    ];
+    let mut algos = get_algorithms().into_iter().filter(|x| x.enabled_by_default()).collect();
     config_algorithms_desired(&mut algos);
     algos
 }
@@ -120,7 +87,16 @@ static CONFIG: LazyLock<Option<Config>> = LazyLock::new(get_config_json);
 fn get_config_json() -> Option<Config> {
     tracing::info!("initializing config");
     let path = std::env::args().nth(1)?;
-    let file_content = std::fs::read(&path).unwrap_or_else(|_| panic!("could not read file at {}", path));
+    let Ok(file_content) = std::fs::read(&path) else {
+        tracing::error!("could not read file at {}", path);
+        return None;
+    };
 
-    serde_json::from_slice(&file_content).unwrap_or_else(|_| panic!("could not parse file at {path}"))
+    match serde_json::from_slice(&file_content) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::error!("could not parse file at {path}: {e:?}");
+            None
+        }
+    }
 }

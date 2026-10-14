@@ -15,13 +15,14 @@ use tf_demo_parser::demo::header::Header;
 
 pub trait DemoHandlerAnalyser: MessageHandler {
     fn handle_user_cmd(&mut self, _packet: tf_demo_parser::demo::packet::usercmd::UserCmdPacket) {}
+    fn handle_console_cmd(&mut self, _packet: tf_demo_parser::demo::packet::consolecmd::ConsoleCmdPacket) {}
 }
 
 impl DemoHandlerAnalyser for NullHandler {}
 
 #[derive(Clone)]
 #[allow(dead_code)]
-pub struct CheatDemoHandler<T: MessageHandler> {
+pub struct CheatDemoHandler<T: DemoHandlerAnalyser> {
     pub server_tick: ServerTick,
     pub demo_tick: DemoTick,
     pub string_table_names: Vec<Box<str>>,
@@ -82,21 +83,48 @@ impl<T: DemoHandlerAnalyser> CheatDemoHandler<T> {
             }
             Packet::Message(packet) | Packet::Signon(packet) => {
                 self.analyser.handle_packet_meta(packet.tick, &packet.meta, &self.state_handler);
+                let mut net_ticks = Vec::new();
+                let mut packet_entities = Vec::new();
+                let mut other_messages = Vec::new();
+
                 for message in packet.messages {
                     match message {
-                        Message::NetTick(message) => {
-                            self.server_tick = message.tick;
-                            self.handle_message(Message::NetTick(message), packet.tick)
+                        Message::CreateStringTable(message) => {
+                            self.handle_string_table(message.table);
                         }
-                        Message::CreateStringTable(message) => self.handle_string_table(message.table),
-                        Message::UpdateStringTable(message) => self.handle_table_update(message.table_id, message.entries),
-                        Message::PacketEntities(msg) => self.handle_message(Message::PacketEntities(msg), packet.tick),
-                        message => self.handle_message(message, packet.tick),
+                        Message::UpdateStringTable(message) => {
+                            self.handle_table_update(message.table_id, message.entries);
+                        }
+                        Message::PacketEntities(msg) => {
+                            packet_entities.push(msg);
+                        }
+                        Message::NetTick(message) => {
+                            net_ticks.push(message);
+                        }
+                        message => {
+                            other_messages.push(message);
+                        }
                     }
+                }
+
+                for msg in packet_entities {
+                    self.handle_message(Message::PacketEntities(msg), packet.tick);
+                }
+
+                for message in other_messages {
+                    self.handle_message(message, packet.tick);
+                }
+
+                for message in net_ticks {
+                    self.server_tick = message.tick;
+                    self.handle_message(Message::NetTick(message), packet.tick);
                 }
             }
             Packet::UserCmd(packet) => {
                 self.analyser.handle_user_cmd(packet);
+            }
+            Packet::ConsoleCmd(packet) => {
+                self.analyser.handle_console_cmd(packet);
             }
             _ => {}
         };
@@ -125,6 +153,7 @@ impl<T: DemoHandlerAnalyser> CheatDemoHandler<T> {
     }
 
     fn handle_data_table(&mut self, send_tables: Vec<ParseSendTable>, server_classes: Vec<ServerClass>) -> Result<()> {
+        crate::util::datatable_validator::validate_send_tables(&send_tables, &server_classes)?;
         self.analyser.handle_data_tables(&send_tables, &server_classes, &self.state_handler);
         self.state_handler.handle_data_table(&send_tables, server_classes)
     }

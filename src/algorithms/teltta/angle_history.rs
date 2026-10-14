@@ -45,6 +45,12 @@ impl Default for Parameters {
     }
 }
 
+impl AngleHistory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 impl CheatAlgorithm for AngleHistory {
     fn enabled_by_default(&self) -> bool {
         true

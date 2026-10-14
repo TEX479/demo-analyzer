@@ -18,6 +18,18 @@ pub struct WriteToFile {
     write_batch_size: usize,
 }
 
+impl Default for WriteToFile {
+    fn default() -> Self {
+        let write_batch_size = 1024;
+        WriteToFile {
+            state_history: Vec::with_capacity(write_batch_size),
+            file: None,
+            first_write: true,
+            write_batch_size,
+        }
+    }
+}
+
 impl WriteToFile {
     fn write_states_to_file(&mut self) -> anyhow::Result<()> {
         if self.first_write {
@@ -45,14 +57,8 @@ impl WriteToFile {
         Ok(())
     }
 
-    pub fn new() -> anyhow::Result<WriteToFile> {
-        let write_batch_size = 1024;
-        Ok(WriteToFile {
-            state_history: Vec::with_capacity(write_batch_size as usize),
-            file: None,
-            first_write: true,
-            write_batch_size: 1024,
-        })
+    pub fn new() -> WriteToFile {
+        Self::default()
     }
 }
 

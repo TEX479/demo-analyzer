@@ -19,17 +19,22 @@
 // Eye angles of other players are networked with ~0.35° precision and only change when the player's
 // simulation time advances (every ~2 ticks), so all checks run on simtime samples.
 
+// TODO: remove any and all `serde_json::Value` instances and replace with detection struct
+// TODO: refactor more
+
 use std::collections::{HashMap, VecDeque};
 
 use anyhow::Error;
 use serde_json::json;
 use steamid_ng::SteamID;
-use tf_demo_parser::demo::vector::Vector;
-use tf_demo_parser::{MessageType, ParserState};
+use tf_demo_parser::ParserState;
 
 use crate::base::cheat_analyser_base::{CheatAnalyserState, Player, PlayerState};
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
-use crate::lib::parameters::{get_parameter_value, Parameter, Parameters};
+use crate::lib::parameters::AlgorithmParameters;
+use crate::make_algorithm_params;
+use crate::util::helpers::player_finders::valid_players;
+use crate::util::helpers::{Vec3, ViewAngle};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const SAMPLE_HISTORY: usize = 48;
@@ -57,7 +62,12 @@ enum AimModel {
     /// Aimed at the predicted position. `gravity`: fraction of world gravity acting on the projectile
     /// (aimed higher, along the ballistic arc). `splash`: aimed at the feet. `heals_team`: also shot
     /// at teammates.
-    Projectile { speed: f32, gravity: f32, splash: bool, heals_team: bool },
+    Projectile {
+        speed: f32,
+        gravity: f32,
+        splash: bool,
+        heals_team: bool,
+    },
     /// Flame throwers (legit pyros look the same at this resolution), medi guns, tools, throwables and
     /// grenade launchers (steep arc, aim too ambiguous)
     Excluded,
@@ -68,9 +78,8 @@ struct Sample {
     tick: u32,
     /// Decoded simulation tick
     sim_tick: i64,
-    yaw: f32,
-    pitch: f32,
-    eye: Vector,
+    view_angle: ViewAngle,
+    eye: Vec3,
     team: u8,
     fired: bool,
     model: AimModel,
@@ -80,7 +89,7 @@ struct Sample {
 #[derive(Clone, Copy)]
 struct PositionRecord {
     tick: u32,
-    position: Vector,
+    position: Vec3,
     team: u8,
     ducking: bool,
 }
@@ -92,10 +101,10 @@ struct PlayerData {
     last_sim_tick: Option<i64>,
     last_seen_tick: u32,
     /// Lock runs keyed by (target, lag)
-    locks: HashMap<(u64, i8), LockRun>,
+    locks: HashMap<(SteamID, i8), LockRun>,
     last_detection: HashMap<&'static str, u32>,
     /// Longest qualifying ended run per target, emitted once no run on that target is alive
-    pending_locks: HashMap<u64, (i8, LockRun)>,
+    pending_locks: HashMap<SteamID, (i8, LockRun)>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -113,7 +122,7 @@ struct LockRun {
 
 /// A possible target and its recent position records.
 struct Target<'p> {
-    sid: u64,
+    sid: SteamID,
     ally: bool,
     positions: &'p VecDeque<PositionRecord>,
 }
@@ -130,39 +139,101 @@ struct Landing {
 #[derive(Default)]
 pub struct PlainAimbot {
     params: Parameters,
-    jg: JankGuard,
-    players: HashMap<u64, PlayerData>,
+    players: HashMap<SteamID, PlayerData>,
     weapon_models: HashMap<String, AimModel>,
 }
 
-fn view_dir(yaw: f32, pitch: f32) -> (f32, f32, f32) {
-    let (y, p) = (yaw.to_radians(), pitch.to_radians());
-    (p.cos() * y.cos(), p.cos() * y.sin(), -p.sin())
+// TODO: move snap, lock & corner to their own structs
+#[derive(Debug, Clone, Copy)]
+pub struct Parameters {
+    max_lag_ticks: u32,
+    projectile_model: bool,
+    projectile_lead_ticks: u32,
+    lag_step: u32,
+    // TODO: maybe replace with jankguard::EVENT_TIMEOUT
+    spawn_grace_ticks: u32,
+    max_sample_gap: u32,
+    max_simtime_gap: u32,
+    // snap
+    check_snap: bool,
+    snap_min_step: f32,
+    snap_max_step: f32,
+    snap_min_ratio: f32,
+    snap_max_error: f32,
+    snap_min_error_limit: f32,
+    snap_max_error_rel: f32,
+    snap_min_distance: f32,
+    snap_follow_samples: usize,
+    snap_max_follow_error: f32,
+    snap_projectile_follow_samples: usize,
+    snap_projectile_max_follow_error: f32,
+    // lock
+    check_lock: bool,
+    lock_max_error: f32,
+    lock_max_mean_error: f32,
+    lock_min_ticks: u32,
+    lock_min_view_path: f32,
+    lock_min_moving_fraction: f32,
+    lock_min_speed: f32,
+    lock_prefilter: f32,
+    // corner
+    check_corner: bool,
+    corner_min_step: f32,
+    corner_max_step: f32,
+    corner_min_turn: f32,
+    corner_min_return: f32,
+    corner_max_target_error: f32,
+    min_detection_spacing: u32,
 }
 
-fn angle_between(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
-    let la = (a.0 * a.0 + a.1 * a.1 + a.2 * a.2).sqrt();
-    let lb = (b.0 * b.0 + b.1 * b.1 + b.2 * b.2).sqrt();
-    if la < 1e-6 || lb < 1e-6 {
-        return 180.0;
+impl Default for Parameters {
+    fn default() -> Self {
+        Self {
+            max_lag_ticks: 24,
+            projectile_model: true,
+            projectile_lead_ticks: 6,
+            lag_step: 2,
+            spawn_grace_ticks: 60,
+            max_sample_gap: 3,
+            max_simtime_gap: 4,
+            check_snap: true,
+            snap_min_step: 10.0,
+            snap_max_step: 120.0,
+            snap_min_ratio: 12.0,
+            snap_max_error: 0.25,
+            snap_min_error_limit: 0.25,
+            snap_max_error_rel: 0.05,
+            snap_min_distance: 400.0,
+            snap_follow_samples: 2,
+            snap_max_follow_error: 0.5,
+            snap_projectile_follow_samples: 1,
+            snap_projectile_max_follow_error: 1.0,
+            check_lock: true,
+            lock_max_error: 0.8,
+            lock_max_mean_error: 0.25,
+            lock_min_ticks: 20,
+            lock_min_view_path: 15.0,
+            lock_min_moving_fraction: 0.6,
+            lock_min_speed: 0.0,
+            lock_prefilter: 45.0,
+            check_corner: true,
+            corner_min_step: 10.0,
+            corner_max_step: 150.0,
+            corner_min_turn: 120.0,
+            corner_min_return: 0.3,
+            corner_max_target_error: 0.5,
+            min_detection_spacing: 66,
+        }
     }
-    // atan2 keeps precision for tiny angles, unlike acos
-    let cross = (
-        a.1 * b.2 - a.2 * b.1,
-        a.2 * b.0 - a.0 * b.2,
-        a.0 * b.1 - a.1 * b.0,
-    );
-    let c = (cross.0 * cross.0 + cross.1 * cross.1 + cross.2 * cross.2).sqrt();
-    let d = a.0 * b.0 + a.1 * b.1 + a.2 * b.2;
-    c.atan2(d).to_degrees()
 }
 
 fn view_step(a: &Sample, b: &Sample) -> f32 {
-    angle_between(view_dir(a.yaw, a.pitch), view_dir(b.yaw, b.pitch))
+    // TODO: maybe replace with ViewAngle's world_delta
+    a.view_angle.to_unit_vec().angle_between(b.view_angle.to_unit_vec())
 }
 
 /// Eye height of a player class (standing), ducking players use 45 units.
-fn eye_position(player: &Player) -> Vector {
+fn eye_position(player: &Player) -> Vec3 {
     let height = if player.flags & FL_DUCKING != 0 {
         45.0
     } else {
@@ -172,7 +243,7 @@ fn eye_position(player: &Player) -> Vector {
             _ => 68.0,
         }
     };
-    Vector {
+    Vec3 {
         x: player.position.x,
         y: player.position.y,
         z: player.position.z + height,
@@ -181,19 +252,19 @@ fn eye_position(player: &Player) -> Vector {
 
 /// Angular error between the view ray and the closest point of the target's vertical column
 /// `[target.z + bottom, target.z + top]`, plus the distance to the target.
-fn column_error(eye: Vector, yaw: f32, pitch: f32, target: Vector, bottom: f32, top: f32) -> Option<(f32, f32)> {
-    let dir = view_dir(yaw, pitch);
+fn column_error(eye: Vec3, view_angle: ViewAngle, target: Vec3, bottom: f32, top: f32) -> Option<(f32, f32)> {
+    let dir = view_angle.to_unit_vec();
     let dx = target.x - eye.x;
     let dy = target.y - eye.y;
     let horizontal = dx.hypot(dy);
-    let dir_h = dir.0.hypot(dir.1);
+    let dir_h = dir.x.hypot(dir.y);
     if horizontal < 16.0 || dir_h < 1e-4 {
         return None;
     }
-    let ray_z = eye.z + dir.2 / dir_h * horizontal;
+    let ray_z = eye.z + dir.z / dir_h * horizontal;
     let z = ray_z.clamp(target.z + bottom, target.z + top);
-    let to = (dx, dy, z - eye.z);
-    Some((angle_between(dir, to), (horizontal * horizontal + to.2 * to.2).sqrt()))
+    let to = Vec3 { x: dx, y: dy, z: z - eye.z };
+    Some((dir.angle_between(to), (horizontal * horizontal + to.z * to.z).sqrt()))
 }
 
 /// Position of a player at `tick`, linearly interpolated between records.
@@ -214,7 +285,7 @@ fn position_at(positions: &VecDeque<PositionRecord>, tick: i64) -> Option<Positi
     let f = (tick - older.tick as i64) as f32 / span as f32;
     Some(PositionRecord {
         tick: tick as u32,
-        position: Vector {
+        position: Vec3 {
             x: older.position.x + (newer.position.x - older.position.x) * f,
             y: older.position.y + (newer.position.y - older.position.y) * f,
             z: older.position.z + (newer.position.z - older.position.z) * f,
@@ -226,7 +297,7 @@ fn position_at(positions: &VecDeque<PositionRecord>, tick: i64) -> Option<Positi
 
 /// Error of the view against the flat ballistic arcs (projectile `speed`, gravity `g`) that hit the
 /// target column `[target.z + 5, target.z + top]`.
-fn ballistic_error(sample: &Sample, target: Vector, speed: f32, g: f32, top: f32) -> Option<(f32, f32)> {
+fn ballistic_error(sample: &Sample, target: Vec3, speed: f32, g: f32, top: f32) -> Option<(f32, f32)> {
     let dx = target.x - sample.eye.x;
     let dy = target.y - sample.eye.y;
     let horizontal = dx.hypot(dy);
@@ -242,10 +313,16 @@ fn ballistic_error(sample: &Sample, target: Vector, speed: f32, g: f32, top: f32
     let low = elevation(target.z + BODY_BOTTOM - sample.eye.z)?;
     let high = elevation(target.z + top - sample.eye.z).unwrap_or(low);
     // Source pitch is positive downwards
-    let view_elevation = -sample.pitch;
-    let dpitch = if view_elevation < low { low - view_elevation } else if view_elevation > high { view_elevation - high } else { 0.0 };
+    let view_elevation = -sample.view_angle.pitch;
+    let dpitch = if view_elevation < low {
+        low - view_elevation
+    } else if view_elevation > high {
+        view_elevation - high
+    } else {
+        0.0
+    };
     let bearing = dy.atan2(dx).to_degrees();
-    let dyaw = ((sample.yaw - bearing + 180.0).rem_euclid(360.0) - 180.0).abs() * sample.pitch.to_radians().cos();
+    let dyaw = ((sample.view_angle.yaw - bearing + 180.0).rem_euclid(360.0) - 180.0).abs() * sample.view_angle.pitch.to_radians().cos();
     Some((dyaw.hypot(dpitch), horizontal))
 }
 
@@ -260,7 +337,7 @@ fn model_error(sample: &Sample, target: &Target, lag: i32) -> Option<(f32, f32)>
             AimModel::Projectile { splash: true, .. } => SPLASH_BOTTOM,
             _ => BODY_BOTTOM,
         };
-        return column_error(sample.eye, sample.yaw, sample.pitch, rec.position, bottom, top);
+        return column_error(sample.eye, sample.view_angle, rec.position, bottom, top);
     }
     match sample.model {
         AimModel::Projectile { speed, gravity, splash, .. } => {
@@ -268,12 +345,16 @@ fn model_error(sample: &Sample, target: &Target, lag: i32) -> Option<(f32, f32)>
             let older = position_at(target.positions, at - VELOCITY_TICKS).unwrap_or(rec);
             let span = (rec.tick as i64 - older.tick as i64).max(1) as f32;
             let vel = rec.position - older.position;
-            let vel = Vector { x: vel.x / span, y: vel.y / span, z: 0.0 };
+            let vel = Vec3 {
+                x: vel.x / span,
+                y: vel.y / span,
+                z: 0.0,
+            };
             let mut predicted = rec.position;
             for _ in 0..2 {
                 let d = predicted - sample.eye;
                 let flight = ((d.x * d.x + d.y * d.y + d.z * d.z).sqrt() / speed * TICKS_PER_SECOND).min(MAX_FLIGHT_TICKS);
-                predicted = Vector {
+                predicted = Vec3 {
                     x: rec.position.x + vel.x * flight,
                     y: rec.position.y + vel.y * flight,
                     z: rec.position.z,
@@ -285,75 +366,99 @@ fn model_error(sample: &Sample, target: &Target, lag: i32) -> Option<(f32, f32)>
                 ballistic_error(sample, predicted, speed, gravity * WORLD_GRAVITY, top)
             } else {
                 let bottom = if splash { SPLASH_BOTTOM } else { BODY_BOTTOM };
-                column_error(sample.eye, sample.yaw, sample.pitch, predicted, bottom, top)
+                column_error(sample.eye, sample.view_angle, predicted, bottom, top)
             }
         }
-        _ => column_error(sample.eye, sample.yaw, sample.pitch, rec.position, BODY_BOTTOM, top),
+        _ => column_error(sample.eye, sample.view_angle, rec.position, BODY_BOTTOM, top),
     }
 }
 
 impl PlainAimbot {
     pub fn new() -> Self {
-        Self {
-            params: HashMap::from([
-                ("enabled".to_string(), Parameter::Bool(true)),
-                ("max_lag_ticks".to_string(), Parameter::Int(24)),
-                ("projectile_model".to_string(), Parameter::Bool(true)),
-                ("projectile_lead_ticks".to_string(), Parameter::Int(6)),
-                ("lag_step".to_string(), Parameter::Int(2)),
-                ("spawn_grace_ticks".to_string(), Parameter::Int(60)),
-                ("max_sample_gap".to_string(), Parameter::Int(3)),
-                ("max_simtime_gap".to_string(), Parameter::Int(4)),
-                // snap
-                ("check_snap".to_string(), Parameter::Bool(true)),
-                ("snap_min_step".to_string(), Parameter::Float(10.0)),
-                ("snap_max_step".to_string(), Parameter::Float(120.0)),
-                ("snap_min_ratio".to_string(), Parameter::Float(12.0)),
-                ("snap_max_error".to_string(), Parameter::Float(0.25)),
-                ("snap_min_error_limit".to_string(), Parameter::Float(0.25)),
-                ("snap_max_error_rel".to_string(), Parameter::Float(0.05)),
-                ("snap_min_distance".to_string(), Parameter::Float(400.0)),
-                ("snap_follow_samples".to_string(), Parameter::Int(2)),
-                ("snap_max_follow_error".to_string(), Parameter::Float(0.5)),
-                ("snap_projectile_follow_samples".to_string(), Parameter::Int(1)),
-                ("snap_projectile_max_follow_error".to_string(), Parameter::Float(1.0)),
-                // lock
-                ("check_lock".to_string(), Parameter::Bool(true)),
-                ("lock_max_error".to_string(), Parameter::Float(0.8)),
-                ("lock_max_mean_error".to_string(), Parameter::Float(0.25)),
-                ("lock_min_ticks".to_string(), Parameter::Int(20)),
-                ("lock_min_view_path".to_string(), Parameter::Float(15.0)),
-                ("lock_min_moving_fraction".to_string(), Parameter::Float(0.6)),
-                ("lock_min_speed".to_string(), Parameter::Float(0.0)),
-                ("lock_prefilter".to_string(), Parameter::Float(45.0)),
-                // corner
-                ("check_corner".to_string(), Parameter::Bool(true)),
-                ("corner_min_step".to_string(), Parameter::Float(10.0)),
-                ("corner_max_step".to_string(), Parameter::Float(150.0)),
-                ("corner_min_turn".to_string(), Parameter::Float(120.0)),
-                ("corner_min_return".to_string(), Parameter::Float(0.3)),
-                ("corner_max_target_error".to_string(), Parameter::Float(0.5)),
-                ("min_detection_spacing".to_string(), Parameter::Int(66)),
-            ]),
-            ..Default::default()
-        }
+        Self::default()
     }
 
     /// Melee weapons are swung around wildly, which produces sharp view corners.
     fn is_melee(name: &str) -> bool {
         let lw = name.to_lowercase();
-        ["knife", "wrench", "bat", "bottle", "fist", "gloves", "shovel", "axe", "kukri", "bushwacka", "saw",
-         "eyelander", "katana", "pan", "sword", "skullcutter", "equalizer", "escape plan", "jag", "gunslinger",
-         "spy-cicle", "eternal reward", "kunai", "sharp dresser", "powerjack", "third degree", "candy cane",
-         "sandman", "ubersaw", "vita-saw", "amputator", "persuader", "caber", "zatoichi", "claidheamh",
-         "market gardener", "disciplinary", "holiday punch", "eviction notice", "fist of steel", "warrior",
-         "big earner", "wrap assassin", "atomizer", "fan o'war", "unarmed combat", "homewrecker", "maul",
-         "neon annihilator", "postal pummeler", "back scratcher", "lollichop", "ham shank", "conscientious",
-         "freedom staff", "bat outta hell", "memory maker", "black rose", "bread bite", "necro smasher",
-         "crossing guard", "prinny machete", "nessie", "golf club", "saxxy", "solemn vow", "southern hospitality",
-         "boston basher", "sun-on-a-stick", "scotsman", "half-zatoichi", "tribalman", "shahanshah", "melee"]
-            .iter()
-            .any(|w| lw.contains(w))
+        [
+            "knife",
+            "wrench",
+            "bat",
+            "bottle",
+            "fist",
+            "gloves",
+            "shovel",
+            "axe",
+            "kukri",
+            "bushwacka",
+            "saw",
+            "eyelander",
+            "katana",
+            "pan",
+            "sword",
+            "skullcutter",
+            "equalizer",
+            "escape plan",
+            "jag",
+            "gunslinger",
+            "spy-cicle",
+            "eternal reward",
+            "kunai",
+            "sharp dresser",
+            "powerjack",
+            "third degree",
+            "candy cane",
+            "sandman",
+            "ubersaw",
+            "vita-saw",
+            "amputator",
+            "persuader",
+            "caber",
+            "zatoichi",
+            "claidheamh",
+            "market gardener",
+            "disciplinary",
+            "holiday punch",
+            "eviction notice",
+            "fist of steel",
+            "warrior",
+            "big earner",
+            "wrap assassin",
+            "atomizer",
+            "fan o'war",
+            "unarmed combat",
+            "homewrecker",
+            "maul",
+            "neon annihilator",
+            "postal pummeler",
+            "back scratcher",
+            "lollichop",
+            "ham shank",
+            "conscientious",
+            "freedom staff",
+            "bat outta hell",
+            "memory maker",
+            "black rose",
+            "bread bite",
+            "necro smasher",
+            "crossing guard",
+            "prinny machete",
+            "nessie",
+            "golf club",
+            "saxxy",
+            "solemn vow",
+            "southern hospitality",
+            "boston basher",
+            "sun-on-a-stick",
+            "scotsman",
+            "half-zatoichi",
+            "tribalman",
+            "shahanshah",
+            "melee",
+        ]
+        .iter()
+        .any(|w| lw.contains(w))
     }
 
     /// Aim model of a weapon. Without `projectile_model`, every weapon is assumed to be aimed like a
@@ -364,10 +469,24 @@ impl PlainAimbot {
             return model;
         }
         let lw = name.to_lowercase();
-        let grenade = ["grenade launcher", "iron bomber", "loch-n-load", "loose cannon", "stickybomb",
-                       "scottish resistance", "quickiebomb"].iter().any(|w| lw.contains(w));
+        let grenade = [
+            "grenade launcher",
+            "iron bomber",
+            "loch-n-load",
+            "loose cannon",
+            "stickybomb",
+            "scottish resistance",
+            "quickiebomb",
+        ]
+        .iter()
+        .any(|w| lw.contains(w));
         match model {
-            AimModel::Projectile { heals_team, .. } => AimModel::Projectile { speed: f32::INFINITY, gravity: 0.0, splash: false, heals_team },
+            AimModel::Projectile { heals_team, .. } => AimModel::Projectile {
+                speed: f32::INFINITY,
+                gravity: 0.0,
+                splash: false,
+                heals_team,
+            },
             AimModel::Excluded if grenade => AimModel::Hitscan,
             other => other,
         }
@@ -376,15 +495,59 @@ impl PlainAimbot {
     fn projectile_aim_model(name: &str) -> AimModel {
         let lw = name.to_lowercase();
         let any = |words: &[&str]| words.iter().any(|w| lw.contains(w));
-        let projectile = |speed: f32, gravity: f32, splash: bool| AimModel::Projectile { speed, gravity, splash, heals_team: false };
-        if any(&["builder", "pda", "toolbox", "destruction", "disguise", "sapper", "red-tape", "invis watch",
-                 "cloak and dagger", "dead ringer", "wrangler", "giger counter", "medi gun", "medigun", "kritzkrieg",
-                 "quick-fix", "vaccinator", "jumper", "jarate", "mad milk", "gas passer", "mutated milk", "self-aware",
-                 "grenade launcher", "iron bomber", "loch-n-load", "loose cannon", "stickybomb", "scottish resistance",
-                 "quickiebomb", "flame", "degreaser", "backburner", "phlog", "rainblower", "nostromo", "dragon's fury"]) {
+        let projectile = |speed: f32, gravity: f32, splash: bool| AimModel::Projectile {
+            speed,
+            gravity,
+            splash,
+            heals_team: false,
+        };
+        if any(&[
+            "builder",
+            "pda",
+            "toolbox",
+            "destruction",
+            "disguise",
+            "sapper",
+            "red-tape",
+            "invis watch",
+            "cloak and dagger",
+            "dead ringer",
+            "wrangler",
+            "giger counter",
+            "medi gun",
+            "medigun",
+            "kritzkrieg",
+            "quick-fix",
+            "vaccinator",
+            "jumper",
+            "jarate",
+            "mad milk",
+            "gas passer",
+            "mutated milk",
+            "self-aware",
+            "grenade launcher",
+            "iron bomber",
+            "loch-n-load",
+            "loose cannon",
+            "stickybomb",
+            "scottish resistance",
+            "quickiebomb",
+            "flame",
+            "degreaser",
+            "backburner",
+            "phlog",
+            "rainblower",
+            "nostromo",
+            "dragon's fury",
+        ]) {
             AimModel::Excluded
         } else if any(&["crusader's crossbow", "crossbow"]) {
-            AimModel::Projectile { speed: 2400.0, gravity: 0.2, splash: false, heals_team: true }
+            AimModel::Projectile {
+                speed: 2400.0,
+                gravity: 0.2,
+                splash: false,
+                heals_team: true,
+            }
         } else if any(&["direct hit"]) {
             projectile(1980.0, 0.0, true)
         } else if any(&["liberty launcher"]) {
@@ -407,43 +570,48 @@ impl PlainAimbot {
     }
 }
 
-struct Settings {
-    max_lag: u32,
-    projectile_model: bool,
-    projectile_lead: u32,
-    lag_step: u32,
-    spawn_grace: u32,
-    max_sample_gap: u32,
-    max_simtime_gap: u16,
-    check_snap: bool,
-    snap_min_step: f32,
-    snap_max_step: f32,
-    snap_min_ratio: f32,
-    snap_max_error: f32,
-    snap_min_error_limit: f32,
-    snap_max_error_rel: f32,
-    snap_min_distance: f32,
-    snap_follow_samples: usize,
-    snap_max_follow_error: f32,
-    snap_projectile_follow_samples: usize,
-    snap_projectile_max_follow_error: f32,
-    check_corner: bool,
-    corner_min_step: f32,
-    corner_max_step: f32,
-    corner_min_turn: f32,
-    corner_min_return: f32,
-    corner_max_target_error: f32,
-    check_lock: bool,
-    lock_max_error: f32,
-    lock_max_mean_error: f32,
-    lock_min_ticks: u32,
-    lock_min_view_path: f32,
-    lock_min_moving_fraction: f32,
-    lock_min_speed: f32,
-    lock_prefilter: f32,
-    spacing: u32,
+impl<'a> From<&'a mut Parameters> for AlgorithmParameters<'a> {
+    fn from(value: &'a mut Parameters) -> AlgorithmParameters<'a> {
+        make_algorithm_params!(value; [
+            max_lag_ticks,
+            projectile_model,
+            projectile_lead_ticks,
+            lag_step,
+            spawn_grace_ticks,
+            max_sample_gap,
+            max_simtime_gap,
+            check_snap,
+            snap_min_step,
+            snap_max_step,
+            snap_min_ratio,
+            snap_max_error,
+            snap_min_error_limit,
+            snap_max_error_rel,
+            snap_min_distance,
+            snap_follow_samples,
+            snap_max_follow_error,
+            snap_projectile_follow_samples,
+            snap_projectile_max_follow_error,
+            check_lock,
+            lock_max_error,
+            lock_max_mean_error,
+            lock_min_ticks,
+            lock_min_view_path,
+            lock_min_moving_fraction,
+            lock_min_speed,
+            lock_prefilter,
+            check_corner,
+            corner_min_step,
+            corner_max_step,
+            corner_min_turn,
+            corner_min_return,
+            corner_max_target_error,
+            min_detection_spacing,
+        ])
+    }
 }
 
+/*
 impl Settings {
     fn from(params: &Parameters) -> Self {
         let i = |n: &str| get_parameter_value::<i32>(params, n).max(0) as u32;
@@ -487,12 +655,17 @@ impl Settings {
         }
     }
 }
+// */
 
 impl PlainAimbot {
     /// Lags to try for a weapon. Projectiles also try short leads (future positions).
-    fn lags(cfg: &Settings, model: &AimModel) -> impl Iterator<Item = i32> {
-        let lead = if matches!(model, AimModel::Projectile { .. }) { cfg.projectile_lead as i32 } else { 0 };
-        (-lead..=cfg.max_lag as i32).step_by(cfg.lag_step as usize)
+    fn lags(cfg: &Parameters, model: &AimModel) -> impl Iterator<Item = i32> {
+        let lead = if matches!(model, AimModel::Projectile { .. }) {
+            cfg.projectile_lead_ticks as i32
+        } else {
+            0
+        };
+        (-lead..=cfg.max_lag_ticks as i32).step_by(cfg.lag_step as usize)
     }
 
     /// Targets the sample's weapon can be aimed at.
@@ -515,7 +688,7 @@ impl PlainAimbot {
 
     /// Target/lag with the smallest error at `b` (at most `max_error`) that the view was off before
     /// the jump from `a` (at least half the jump away).
-    fn best_landing(cfg: &Settings, a: &Sample, b: &Sample, step: f32, max_error: f32, targets: &[Target]) -> Option<Landing> {
+    fn best_landing(cfg: &Parameters, a: &Sample, b: &Sample, step: f32, max_error: f32, targets: &[Target]) -> Option<Landing> {
         let mut best: Option<Landing> = None;
         for (ti, target) in targets.iter().enumerate() {
             if !Self::valid_target(b, target) {
@@ -530,7 +703,13 @@ impl PlainAimbot {
                 if error_before < 0.5 * step {
                     continue;
                 }
-                best = Some(Landing { error, error_before, target: ti, lag, distance });
+                best = Some(Landing {
+                    error,
+                    error_before,
+                    target: ti,
+                    lag,
+                    distance,
+                });
             }
         }
         best
@@ -539,17 +718,14 @@ impl PlainAimbot {
     /// Impulsive jump into the sample `FOLLOW_SAMPLES` samples ago: the view is still before and
     /// after the jump, lands on a target and stays near it for the next sample(s). Projectiles are
     /// allowed to drift more, their predicted aim point moves with the target.
-    fn check_snap(cfg: &Settings, samples: &VecDeque<Sample>, targets: &[Target]) -> Option<serde_json::Value> {
+    fn check_snap(cfg: &Parameters, samples: &VecDeque<Sample>, targets: &[Target]) -> Option<serde_json::Value> {
         let n = samples.len();
         if !cfg.check_snap || n < FOLLOW_SAMPLES + 4 {
             return None;
         }
         let j = n - 1 - FOLLOW_SAMPLES;
         let (before, a, b, after) = (&samples[j - 2], &samples[j - 1], &samples[j], &samples[j + 1]);
-        if b.model == AimModel::Excluded
-            || b.tick - a.tick > cfg.max_sample_gap
-            || !(1..=cfg.max_simtime_gap as i64).contains(&(b.sim_tick - a.sim_tick))
-        {
+        if b.model == AimModel::Excluded || b.tick - a.tick > cfg.max_sample_gap || !(1..=cfg.max_simtime_gap as i64).contains(&(b.sim_tick - a.sim_tick)) {
             return None;
         }
         let step = view_step(a, b);
@@ -599,7 +775,7 @@ impl PlainAimbot {
     }
 
     /// Smallest aim error of a sample against any valid target and lag.
-    fn nearest_target_error(cfg: &Settings, sample: &Sample, targets: &[Target]) -> f32 {
+    fn nearest_target_error(cfg: &Parameters, sample: &Sample, targets: &[Target]) -> f32 {
         let mut best = 180.0f32;
         for target in targets.iter().filter(|t| Self::valid_target(sample, t)) {
             for lag in Self::lags(cfg, &sample.model) {
@@ -613,7 +789,7 @@ impl PlainAimbot {
 
     /// Sharp turn at speed over the three newest samples A -> B -> C: both steps are large and point
     /// in very different directions, and C does not simply return to A (that is a snapback).
-    fn check_corner(cfg: &Settings, samples: &VecDeque<Sample>, targets: &[Target]) -> Option<serde_json::Value> {
+    fn check_corner(cfg: &Parameters, samples: &VecDeque<Sample>, targets: &[Target]) -> Option<serde_json::Value> {
         let n = samples.len();
         if n < 3 {
             return None;
@@ -629,8 +805,11 @@ impl PlainAimbot {
         }
         // Steps in (yaw, pitch) space, yaw scaled to arc length
         let step = |x: &Sample, y: &Sample| {
-            let dyaw = (y.yaw - x.yaw + 180.0).rem_euclid(360.0) - 180.0;
-            (dyaw * ((x.pitch + y.pitch) * 0.5).to_radians().cos(), y.pitch - x.pitch)
+            let dyaw = (y.view_angle.yaw - x.view_angle.yaw + 180.0).rem_euclid(360.0) - 180.0;
+            (
+                dyaw * ((x.view_angle.pitch + y.view_angle.pitch) * 0.5).to_radians().cos(),
+                y.view_angle.pitch - x.view_angle.pitch,
+            )
         };
         let (v1, v2) = (step(a, b), step(b, c));
         let (m1, m2) = (v1.0.hypot(v1.1), v2.0.hypot(v2.1));
@@ -664,7 +843,7 @@ impl PlainAimbot {
     }
 
     /// Lock run stats are final once the run ends, so qualifying runs are evaluated when they end.
-    fn lock_qualifies(cfg: &Settings, run: &LockRun) -> bool {
+    fn lock_qualifies(cfg: &Parameters, run: &LockRun) -> bool {
         let duration = run.last_tick - run.start_tick;
         duration >= cfg.lock_min_ticks
             && run.view_path >= cfg.lock_min_view_path
@@ -674,7 +853,7 @@ impl PlainAimbot {
     }
 
     /// Extends lock runs with the newest sample, returns the qualifying locks that just ended.
-    fn update_locks(cfg: &Settings, pdata: &mut PlayerData, targets: &[Target]) -> Vec<serde_json::Value> {
+    fn update_locks(cfg: &Parameters, pdata: &mut PlayerData, targets: &[Target]) -> Vec<serde_json::Value> {
         let n = pdata.samples.len();
         if n == 0 {
             return Vec::new();
@@ -683,14 +862,14 @@ impl PlainAimbot {
         let prev = if n >= 2 { Some(pdata.samples[n - 2]) } else { None };
         let contiguous = prev.is_some_and(|p| cur.tick - p.tick <= cfg.max_sample_gap + 1);
         let step = prev.map_or(0.0, |p| view_step(&p, &cur));
-        let mut alive: HashMap<(u64, i8), LockRun> = HashMap::new();
+        let mut alive: HashMap<(SteamID, i8), LockRun> = HashMap::new();
         for target in targets {
             if !Self::valid_target(&cur, target) {
                 continue;
             }
             // Cheap pre-filter on the current position before trying every lag
             let Some(now) = target.positions.back() else { continue };
-            match column_error(cur.eye, cur.yaw, cur.pitch, now.position, SPLASH_BOTTOM, BODY_TOP_STANDING) {
+            match column_error(cur.eye, cur.view_angle, now.position, SPLASH_BOTTOM, BODY_TOP_STANDING) {
                 Some((e, _)) if e <= cfg.lock_prefilter => {}
                 _ => continue,
             }
@@ -702,7 +881,10 @@ impl PlainAimbot {
                 let key = (target.sid, lag as i8);
                 let mut run = match (pdata.locks.get(&key), prev) {
                     (Some(r), Some(p)) if contiguous && r.last_tick == p.tick => *r,
-                    _ => LockRun { start_tick: cur.tick, ..Default::default() },
+                    _ => LockRun {
+                        start_tick: cur.tick,
+                        ..Default::default()
+                    },
                 };
                 if run.samples > 0 {
                     run.view_path += step;
@@ -730,7 +912,7 @@ impl PlainAimbot {
             }
         }
         pdata.locks = alive;
-        let finished: Vec<u64> = pdata
+        let finished: Vec<SteamID> = pdata
             .pending_locks
             .keys()
             .filter(|target| !pdata.locks.keys().any(|k| k.0 == **target))
@@ -757,84 +939,57 @@ impl PlainAimbot {
         }
         results
     }
+}
 
-    fn reset(pdata: &mut PlayerData) {
-        pdata.samples.clear();
-        pdata.positions.clear();
-        pdata.locks.clear();
-        pdata.pending_locks.clear();
-        pdata.last_sim_tick = None;
+impl PlayerData {
+    fn reset(&mut self) {
+        self.samples.clear();
+        self.positions.clear();
+        self.locks.clear();
+        self.pending_locks.clear();
+        self.last_sim_tick = None;
     }
 }
 
-impl<'a> CheatAlgorithm<'a> for PlainAimbot {
-    fn default(&self) -> bool {
+impl CheatAlgorithm for PlainAimbot {
+    fn enabled_by_default(&self) -> bool {
         true
     }
 
-    fn algorithm_name(&self) -> &str {
+    fn algorithm_name(&self) -> &'static str {
         "fidoo/plain_aimbot"
     }
 
-    fn params(&mut self) -> Option<&mut Parameters> {
-        Some(&mut self.params)
+    fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
+        Some(AlgorithmParameters::from(&mut self.params))
     }
 
-    fn handled_messages(&self) -> Result<Vec<MessageType>, bool> {
-        self.jg.handled_messages()
-    }
-
-    fn on_message(
-        &mut self,
-        message: &tf_demo_parser::demo::message::Message,
-        state: &CheatAnalyserState,
-        parser_state: &ParserState,
-        tick: tf_demo_parser::demo::data::DemoTick,
-    ) -> Result<Vec<Detection>, Error> {
-        self.jg.on_message(message, state, parser_state, tick);
-        Ok(vec![])
-    }
-
-    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState) -> Result<Vec<Detection>, Error> {
-        self.jg.on_tick(state);
-        if !get_parameter_value::<bool>(&self.params, "enabled") {
-            return Ok(vec![]);
-        }
-        let cfg = Settings::from(&self.params);
+    fn on_tick(&mut self, state: &CheatAnalyserState, _: &ParserState, jg: &JankGuard) -> Result<Vec<Detection>, Error> {
+        let cfg = self.params;
         let tick = u32::from(state.tick);
 
         // 1. Record positions and new eye angle samples
-        let mut updated_players: Vec<(u64, &'static str, String)> = Vec::new();
+        let mut updated_players: Vec<(SteamID, &'static str, String)> = Vec::new();
         // A SteamID can own several player entities (e.g. after a reconnect), use the live one
-        let mut by_sid: HashMap<u64, &Player> = HashMap::new();
-        for player in &state.players {
-            let Some(info) = &player.info else { continue };
-            if info.steam_id == "BOT" {
-                continue;
-            }
-            let Ok(sid) = SteamID::from_steam3(&info.steam_id).map(u64::from) else { continue };
-            let live = |p: &Player| p.in_pvs && p.state == PlayerState::Alive;
-            if by_sid.get(&sid).is_none_or(|old| !live(old) && live(player)) {
-                by_sid.insert(sid, player);
-            }
-        }
-        for (&sid, player) in &by_sid {
+
+        // TODO: replace with the valid player stuff
+        for (player, _info, sid) in valid_players(state.players.iter()) {
             let pdata = self.players.entry(sid).or_default();
             if !player.in_pvs || player.state != PlayerState::Alive {
-                Self::reset(pdata);
+                pdata.reset();
                 continue;
             }
             if pdata.last_seen_tick > 0 && tick.saturating_sub(pdata.last_seen_tick) > 16 {
-                Self::reset(pdata);
+                pdata.reset();
             }
             if let Some(last) = pdata.positions.back() {
                 let d = player.position - last.position;
                 if d.x * d.x + d.y * d.y + d.z * d.z > TELEPORT_DIST_SQ {
-                    Self::reset(pdata);
+                    pdata.reset();
                 }
             }
             pdata.last_seen_tick = tick;
-            let fired = tick > 0 && self.jg.fired(&sid, tick) == 0;
+            let fired = tick > 0 && jg.fired(&sid, tick) == 0;
             let sim_tick = state.sim_tick(player);
             if pdata.last_sim_tick == Some(sim_tick) {
                 if fired {
@@ -861,8 +1016,8 @@ impl<'a> CheatAlgorithm<'a> for PlainAimbot {
                 .weapon_models
                 .entry(weapon.clone())
                 .or_insert_with(|| Self::aim_model(&weapon, cfg.projectile_model));
-            let since_spawn = self.jg.spawned(&sid, tick).min(self.jg.teleported(&sid, tick));
-            if since_spawn < cfg.spawn_grace || player.is_taunting() || model == AimModel::Excluded {
+            let since_spawn = jg.spawned(&sid, tick).min(jg.teleported(&sid, tick));
+            if since_spawn < cfg.spawn_grace_ticks || player.is_taunting() || model == AimModel::Excluded {
                 pdata.samples.clear();
                 pdata.locks.clear();
                 continue;
@@ -873,8 +1028,7 @@ impl<'a> CheatAlgorithm<'a> for PlainAimbot {
             pdata.samples.push_back(Sample {
                 tick,
                 sim_tick,
-                yaw: player.view_angle,
-                pitch: player.pitch_angle,
+                view_angle: player.view_angle,
                 eye: eye_position(player),
                 team: player.team as u8,
                 fired,
@@ -899,7 +1053,11 @@ impl<'a> CheatAlgorithm<'a> for PlainAimbot {
                     .iter()
                     .filter_map(|(s, d)| {
                         let r = d.positions.back()?;
-                        (tick.saturating_sub(r.tick) <= 8).then_some(Target { sid: *s, ally: r.team == team, positions: &d.positions })
+                        (tick.saturating_sub(r.tick) <= 8).then_some(Target {
+                            sid: *s,
+                            ally: r.team == team,
+                            positions: &d.positions,
+                        })
                     })
                     .collect();
                 if let Some(v) = Self::check_snap(&cfg, &pdata.samples, &targets) {
@@ -918,14 +1076,14 @@ impl<'a> CheatAlgorithm<'a> for PlainAimbot {
             }
             for (kind, mut data) in found {
                 let det_tick = data["tick"].as_u64().unwrap_or(tick as u64) as u32;
-                if !Self::can_flag(&mut pdata, kind, det_tick, cfg.spacing) {
+                if !Self::can_flag(&mut pdata, kind, det_tick, cfg.min_detection_spacing) {
                     continue;
                 }
                 data["class"] = json!(class);
                 data["weapon"] = json!(weapon);
                 out.push(Detection {
                     tick: det_tick,
-                    algorithm: "fidoo/plain_aimbot".to_string(),
+                    algorithm: self.algorithm_name(),
                     player: sid,
                     data,
                 });

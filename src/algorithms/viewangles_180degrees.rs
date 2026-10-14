@@ -29,10 +29,11 @@ pub struct ViewAngles180Degrees {
 // Use the new() function to initalize any variables specified in the struct.
 // IMPORTANT: new() gets called even if the algorithm is not selected! Don't do any non-ephemeral operations here; use CheatAlgorithm::init() instead.
 // Additional helper functions and consts also go here.
-//
-// Why do we not implement `Default`?
-// I am going to just go with `Default` because it just feels nicer. Thus, I'll delete the `new` method.
-// - tex
+impl ViewAngles180Degrees {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 // Implement the CheatAlgorithm trait. This is where the bulk of your algorithm resides.
 // Any interesting detections should be documented in a Detection object and returned within a vector.
@@ -42,7 +43,7 @@ impl CheatAlgorithm for ViewAngles180Degrees {
     // REQUIRED: Should this algorithm run by default if -a isn't specified?
     // Generally should be true, unless you're doing dev-only stuff (writing to files, printing debug output, etc).
     fn enabled_by_default(&self) -> bool {
-        true
+        false
     }
 
     // REQUIRED: Set your algorithm's name here. Best practice is to match the filename.

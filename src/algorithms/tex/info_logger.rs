@@ -29,6 +29,12 @@ impl Default for Parameters {
     }
 }
 
+impl Logger {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 impl CheatAlgorithm for Logger {
     fn does_handle(&self, message_type: tf_demo_parser::MessageType) -> bool {
         matches!(message_type, tf_demo_parser::MessageType::GameEvent)

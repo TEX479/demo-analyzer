@@ -7,9 +7,7 @@ use std::{
 use analysis_template::{
     SILENT,
     base::cheat_analyser_base::CheatAnalyser,
-    lib::algorithm::{
-        AimSnap, AutoBackstab, BackTrack, BunnyHop, CheatAlgorithm, DoubleTap, NoSpread, OOBPitch, Psilent5, SilentAim, ViewAngles180Degrees, analyse,
-    },
+    lib::algorithm::{CheatAlgorithm, analyse, get_algorithms},
 };
 use anyhow::Context;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -110,18 +108,5 @@ fn analyze_demo_at_path(path: &Path) -> anyhow::Result<CheatAnalyser> {
 }
 
 fn desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {
-    vec![
-        Box::new(ViewAngles180Degrees::default()),
-        Box::new(OOBPitch::new()),
-        // Box::new(AngleRepeat::new()),
-        // Box::new(AngleHistory::default()),
-        Box::new(AimSnap::new()),
-        Box::new(BackTrack::new()),
-        Box::new(DoubleTap::new()),
-        Box::new(SilentAim::new()),
-        Box::new(Psilent5::new()),
-        Box::new(AutoBackstab::new()),
-        Box::new(BunnyHop::new()),
-        Box::new(NoSpread::new()),
-    ]
+    get_algorithms().into_iter().filter(|x| x.enabled_by_default()).collect()
 }

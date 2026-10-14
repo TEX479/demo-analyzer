@@ -651,6 +651,7 @@ mod tests {
             cond: 0,
             cond_ex: 0,
             cond_ex2: 0,
+            cond_ex3: 0,
             invis_change_complete_time: 0.0,
             flags: 1,
         }
