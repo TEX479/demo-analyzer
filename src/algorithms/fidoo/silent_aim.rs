@@ -17,7 +17,7 @@ use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::valid_players;
 use crate::util::helpers::{KeyValueVec, Vec3, ViewAngle};
-use crate::util::nocrex::jankguard::JankGuard;
+use crate::util::nocrex::jankguard::{EVENT_TIMEOUT, JankGuard};
 
 const TELEPORT_DIST_SQ: f32 = 256.0 * 256.0;
 
@@ -397,10 +397,9 @@ impl CheatAlgorithm for SilentAim {
             pstate.pvs_ticks += 1;
             pstate.last_update_tick = ticknum;
 
-            // JankGuard spawn/teleport immunity check (60 ticks)
+            // JankGuard spawn/teleport immunity check (EVENT_TIMEOUT ticks)
             let ticks_since_event = self.jg.teleported(&steam_id, ticknum).min(self.jg.spawned(&steam_id, ticknum));
-
-            if ticks_since_event < 60 {
+            if ticks_since_event < EVENT_TIMEOUT {
                 pstate.history.clear();
                 continue;
             }

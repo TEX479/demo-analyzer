@@ -175,7 +175,8 @@ impl Psilent4 {
 
 impl CheatAlgorithm for Psilent4 {
     fn enabled_by_default(&self) -> bool {
-        true
+        // false simply because this is outdated & you should use psilent5 instead
+        false
     }
 
     fn algorithm_name(&self) -> &'static str {

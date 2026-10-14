@@ -12,7 +12,7 @@ use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::Vec3;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
-use crate::util::nocrex::jankguard::JankGuard;
+use crate::util::nocrex::jankguard::{EVENT_TIMEOUT, JankGuard};
 
 #[derive(Debug, Default, Clone)]
 struct PlayerBhopState {
@@ -96,7 +96,7 @@ impl CheatAlgorithm for BunnyHop {
             let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
 
             // Ignore detections within 60 ticks of spawn or teleport
-            if ticks_since_event < 60 {
+            if ticks_since_event < EVENT_TIMEOUT {
                 self.player_states.remove(&steam_id);
                 continue;
             }

@@ -12,7 +12,7 @@ use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::Vec3;
 use crate::util::helpers::player_finders::{players_alive_and_in_pvs, valid_players};
-use crate::util::nocrex::jankguard::JankGuard;
+use crate::util::nocrex::jankguard::{EVENT_TIMEOUT, JankGuard};
 
 const TICK_INTERVAL: f32 = 0.015; // 66.67 Hz standard Source engine tick interval
 
@@ -123,7 +123,7 @@ impl CheatAlgorithm for CrouchSpeed {
         for (player, _info, steam_id) in valid_players(players_alive_and_in_pvs(state.players.iter())) {
             // Spawn and teleport grace window (60 ticks)
             let ticks_since_event = jg.teleported(&steam_id, ticknum).min(jg.spawned(&steam_id, ticknum));
-            if ticks_since_event < 60 {
+            if ticks_since_event < EVENT_TIMEOUT {
                 self.player_states.remove(&steam_id);
                 continue;
             }
