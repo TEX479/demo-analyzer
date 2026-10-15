@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
+use anyhow::{Context, Result};
+use bitbuffer::BitRead;
+use std::collections::BTreeMap;
 #[cfg(feature = "gui")]
 use std::collections::HashSet;
 use std::path::Path;
-use anyhow::{Context, Result};
-use bitbuffer::BitRead;
 
 #[cfg(feature = "gui")]
 use eframe::egui;
@@ -12,31 +12,47 @@ use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::DemoTick;
 use tf_demo_parser::demo::gamevent::GameEvent;
 use tf_demo_parser::demo::header::Header;
-use tf_demo_parser::demo::message::packetentities::PacketEntity;
 use tf_demo_parser::demo::message::Message;
+use tf_demo_parser::demo::message::packetentities::EntityId;
+use tf_demo_parser::demo::message::packetentities::PacketEntity;
 use tf_demo_parser::demo::packet::datatable::{ParseSendTable, ServerClass, ServerClassName};
 use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::analyser::{Class, Team, UserId};
 use tf_demo_parser::demo::parser::handler::BorrowMessageHandler;
 use tf_demo_parser::demo::parser::{MessageHandler, RawPacketStream};
-use tf_demo_parser::demo::message::packetentities::EntityId;
 use tf_demo_parser::{Demo, MessageType, ParserState, ReadResult, Stream};
 
 use crate::base::demo_handler_base::CheatDemoHandler;
+use crate::util::helpers::FxHashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EventKind {
-    Connect { name: String, steam_id: String, address: String },
-    Disconnect { reason: String },
-    TeamChange { old_team: Team, new_team: Team },
-    ClassChange { new_class: Class },
+    Connect {
+        name: String,
+        steam_id: String,
+        address: String,
+    },
+    Disconnect {
+        reason: String,
+    },
+    TeamChange {
+        old_team: Team,
+        new_team: Team,
+    },
+    ClassChange {
+        new_class: Class,
+    },
 }
 
 impl std::fmt::Display for EventKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EventKind::Connect { name, steam_id, address } => {
+            EventKind::Connect {
+                name,
+                steam_id,
+                address,
+            } => {
                 if !address.is_empty() {
                     write!(f, "Connected: {} ({}) [{}]", name, steam_id, address)
                 } else {
@@ -51,7 +67,12 @@ impl std::fmt::Display for EventKind {
                 }
             }
             EventKind::TeamChange { old_team, new_team } => {
-                write!(f, "Team changed: {} -> {}", format_team(*old_team), format_team(*new_team))
+                write!(
+                    f,
+                    "Team changed: {} -> {}",
+                    format_team(*old_team),
+                    format_team(*new_team)
+                )
             }
             EventKind::ClassChange { new_class } => {
                 write!(f, "Class changed: {}", format_class(*new_class))
@@ -59,7 +80,6 @@ impl std::fmt::Display for EventKind {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlayerEvent {
@@ -108,11 +128,11 @@ pub fn format_class(class: Class) -> &'static str {
 #[derive(Default)]
 pub struct PlayerListParser {
     pub players_by_id64: BTreeMap<u64, DemoPlayer>,
-    pub userid_to_id64: HashMap<UserId, u64>,
-    pub entid_to_userid: HashMap<EntityId, UserId>,
+    pub userid_to_id64: FxHashMap<UserId, u64>,
+    pub entid_to_userid: FxHashMap<EntityId, UserId>,
     pub class_names: Vec<ServerClassName>,
     pub current_tick: u32,
-    pub unassigned_kd: HashMap<UserId, (u32, u32)>,
+    pub unassigned_kd: FxHashMap<UserId, (u32, u32)>,
 }
 
 impl PlayerListParser {
@@ -120,21 +140,30 @@ impl PlayerListParser {
         Self::default()
     }
 
-    fn get_or_create_player(&mut self, steam_id: u64, user_id: UserId, name: &str, steam3: &str) -> &mut DemoPlayer {
+    fn get_or_create_player(
+        &mut self,
+        steam_id: u64,
+        user_id: UserId,
+        name: &str,
+        steam3: &str,
+    ) -> &mut DemoPlayer {
         self.userid_to_id64.insert(user_id, steam_id);
         let unassigned = self.unassigned_kd.remove(&user_id);
-        let player = self.players_by_id64.entry(steam_id).or_insert_with(|| DemoPlayer {
-            user_id,
-            steam_id,
-            steam3: steam3.to_string(),
-            name: name.to_string(),
-            team: Team::Other,
-            class: Class::Other,
-            entity_id: None,
-            events: Vec::new(),
-            kills: 0,
-            deaths: 0,
-        });
+        let player = self
+            .players_by_id64
+            .entry(steam_id)
+            .or_insert_with(|| DemoPlayer {
+                user_id,
+                steam_id,
+                steam3: steam3.to_string(),
+                name: name.to_string(),
+                team: Team::Other,
+                class: Class::Other,
+                entity_id: None,
+                events: Vec::new(),
+                kills: 0,
+                deaths: 0,
+            });
         if let Some((k, d)) = unassigned {
             player.kills += k;
             player.deaths += d;
@@ -145,10 +174,11 @@ impl PlayerListParser {
     fn record_event(&mut self, steam_id: u64, kind: EventKind) {
         if let Some(player) = self.players_by_id64.get_mut(&steam_id) {
             // Avoid duplicate consecutive identical events at same tick
-            if let Some(last) = player.events.last() {
-                if last.tick == self.current_tick && last.kind == kind {
-                    return;
-                }
+            if let Some(last) = player.events.last()
+                && last.tick == self.current_tick
+                && last.kind == kind
+            {
+                return;
             }
             player.events.push(PlayerEvent {
                 tick: self.current_tick,
@@ -188,45 +218,46 @@ impl PlayerListParser {
 
     fn handle_player_resource(&mut self, entity: &PacketEntity, parser_state: &ParserState) {
         for prop in entity.props(parser_state) {
-            if let Some((table_name, prop_name)) = prop.identifier.names() {
-                if let Ok(player_id) = prop_name.as_str().parse::<u32>() {
-                    let entity_id = EntityId::from(player_id);
-                    let user_id_opt = self.entid_to_userid.get(&entity_id).copied();
-                    let steam_id_opt = user_id_opt.and_then(|uid| self.userid_to_id64.get(&uid).copied());
+            if let Some((table_name, prop_name)) = prop.identifier.names()
+                && let Ok(player_id) = prop_name.as_str().parse::<u32>()
+            {
+                let entity_id = EntityId::from(player_id);
+                let user_id_opt = self.entid_to_userid.get(&entity_id).copied();
+                let steam_id_opt =
+                    user_id_opt.and_then(|uid| self.userid_to_id64.get(&uid).copied());
 
-                    if let Some(steam_id) = steam_id_opt {
-                        if let Some(player) = self.players_by_id64.get_mut(&steam_id) {
-                            match table_name.as_str() {
-                                "m_iTeam" => {
-                                    if let Ok(val) = i64::try_from(&prop.value) {
-                                        let new_team = Team::new(val);
-                                        if new_team != player.team && new_team != Team::Other {
-                                            let old_team = player.team;
-                                            player.team = new_team;
-                                            if old_team != Team::Other {
-                                                player.events.push(PlayerEvent {
-                                                    tick: self.current_tick,
-                                                    kind: EventKind::TeamChange { old_team, new_team },
-                                                });
-                                            }
-                                        }
+                if let Some(steam_id) = steam_id_opt
+                    && let Some(player) = self.players_by_id64.get_mut(&steam_id)
+                {
+                    match table_name.as_str() {
+                        "m_iTeam" => {
+                            if let Ok(val) = i64::try_from(&prop.value) {
+                                let new_team = Team::new(val);
+                                if new_team != player.team && new_team != Team::Other {
+                                    let old_team = player.team;
+                                    player.team = new_team;
+                                    if old_team != Team::Other {
+                                        player.events.push(PlayerEvent {
+                                            tick: self.current_tick,
+                                            kind: EventKind::TeamChange { old_team, new_team },
+                                        });
                                     }
                                 }
-                                "m_iPlayerClass" => {
-                                    if let Ok(val) = i64::try_from(&prop.value) {
-                                        let new_class = Class::new(val);
-                                        if new_class != player.class && new_class != Class::Other {
-                                            player.class = new_class;
-                                            player.events.push(PlayerEvent {
-                                                tick: self.current_tick,
-                                                kind: EventKind::ClassChange { new_class },
-                                            });
-                                        }
-                                    }
-                                }
-                                _ => {}
                             }
                         }
+                        "m_iPlayerClass" => {
+                            if let Ok(val) = i64::try_from(&prop.value) {
+                                let new_class = Class::new(val);
+                                if new_class != player.class && new_class != Class::Other {
+                                    player.class = new_class;
+                                    player.events.push(PlayerEvent {
+                                        tick: self.current_tick,
+                                        kind: EventKind::ClassChange { new_class },
+                                    });
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -291,7 +322,8 @@ impl MessageHandler for PlayerListParser {
                             .unwrap_or(0);
                         if id64 > 0 {
                             let uid = UserId::from(e.user_id);
-                            self.entid_to_userid.insert(EntityId::from(e.index as u32), uid);
+                            self.entid_to_userid
+                                .insert(EntityId::from(e.index as u32), uid);
                             self.get_or_create_player(id64, uid, &name_str, &net_id_str);
                             self.record_event(
                                 id64,
@@ -340,14 +372,14 @@ impl MessageHandler for PlayerListParser {
                     let uid = UserId::from(e.user_id);
                     let team = Team::new(e.team as i64);
                     let class = Class::new(e.class as i64);
-                    if let Some(&id64) = self.userid_to_id64.get(&uid) {
-                        if let Some(player) = self.players_by_id64.get_mut(&id64) {
-                            if team != Team::Other {
-                                player.team = team;
-                            }
-                            if class != Class::Other {
-                                player.class = class;
-                            }
+                    if let Some(&id64) = self.userid_to_id64.get(&uid)
+                        && let Some(player) = self.players_by_id64.get_mut(&id64)
+                    {
+                        if team != Team::Other {
+                            player.team = team;
+                        }
+                        if class != Class::Other {
+                            player.class = class;
                         }
                     }
                 }
@@ -381,7 +413,6 @@ impl MessageHandler for PlayerListParser {
             _ => {}
         }
     }
-
 
     fn handle_string_entry(
         &mut self,
@@ -419,11 +450,11 @@ impl MessageHandler for PlayerListParser {
 
     fn into_output(mut self, _state: &ParserState) -> Self::Output {
         for (uid, (k, d)) in self.unassigned_kd.drain() {
-            if let Some(&id64) = self.userid_to_id64.get(&uid) {
-                if let Some(player) = self.players_by_id64.get_mut(&id64) {
-                    player.kills += k;
-                    player.deaths += d;
-                }
+            if let Some(&id64) = self.userid_to_id64.get(&uid)
+                && let Some(player) = self.players_by_id64.get_mut(&id64)
+            {
+                player.kills += k;
+                player.deaths += d;
             }
         }
         self.players_by_id64.into_values().collect()
@@ -446,8 +477,7 @@ pub fn parse_playerlist<P: AsRef<Path>>(path: P) -> Result<Vec<DemoPlayer>> {
 
     let demo = Demo::new(&file_bytes);
     let mut stream = demo.get_stream();
-    let header: Header = Header::read(&mut stream)
-        .with_context(|| "Failed to read demo header")?;
+    let header: Header = Header::read(&mut stream).with_context(|| "Failed to read demo header")?;
     let mut packets = RawPacketStream::new(stream);
 
     let parser = PlayerListParser::new();
@@ -465,11 +495,12 @@ pub fn parse_playerlist<P: AsRef<Path>>(path: P) -> Result<Vec<DemoPlayer>> {
 
     let mut players = handler.analyser.into_output(&handler.state_handler);
     // Sort players by name
-    players.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    players.sort_by_key(|a| a.name.to_lowercase());
     Ok(players)
 }
 
 #[cfg(feature = "gui")]
+#[derive(Default)]
 pub struct PlayerlistWindow {
     pub players: Vec<DemoPlayer>,
     pub is_loading: bool,
@@ -484,16 +515,7 @@ pub struct PlayerlistWindow {
 #[cfg(feature = "gui")]
 impl PlayerlistWindow {
     pub fn new() -> Self {
-        Self {
-            players: Vec::new(),
-            is_loading: false,
-            is_open: false,
-            error: None,
-            expanded_player: None,
-            filter_query: String::new(),
-            current_file: None,
-            recv: None,
-        }
+        Self::default()
     }
 
     pub fn open_for_file<P: AsRef<Path>>(&mut self, path: P) {
@@ -547,20 +569,20 @@ impl PlayerlistWindow {
             return;
         }
 
-        if let Some(recv) = &self.recv {
-            if let Ok(res) = recv.try_recv() {
-                self.is_loading = false;
-                match res {
-                    Ok(players) => {
-                        self.players = players;
-                        self.error = None;
-                    }
-                    Err(e) => {
-                        self.error = Some(format!("{:#}", e));
-                    }
+        if let Some(recv) = &self.recv
+            && let Ok(res) = recv.try_recv()
+        {
+            self.is_loading = false;
+            match res {
+                Ok(players) => {
+                    self.players = players;
+                    self.error = None;
                 }
-                self.recv = None;
+                Err(e) => {
+                    self.error = Some(format!("{:#}", e));
+                }
             }
+            self.recv = None;
         }
 
         let mut is_open = self.is_open;
@@ -574,7 +596,10 @@ impl PlayerlistWindow {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 if let Some(err) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(235, 70, 70), format!("Error: {}", err));
+                    ui.colored_label(
+                        egui::Color32::from_rgb(235, 70, 70),
+                        format!("Error: {}", err),
+                    );
                     ui.add_space(8.0);
                     if ui.button("Close").clicked() {
                         self.is_open = false;
@@ -618,7 +643,10 @@ impl PlayerlistWindow {
                 let other_players: Vec<&DemoPlayer> = self
                     .players
                     .iter()
-                    .filter(|p| (p.team == Team::Other || p.team == Team::Spectator) && self.matches_filter(p))
+                    .filter(|p| {
+                        (p.team == Team::Other || p.team == Team::Spectator)
+                            && self.matches_filter(p)
+                    })
                     .collect();
 
                 let mut player_to_toggle_expand = None;
@@ -628,7 +656,6 @@ impl PlayerlistWindow {
                     .auto_shrink([false, true])
                     .max_height(max_scroll_h)
                     .show(ui, |ui| {
-
                         ui.columns(3, |columns| {
                             // Column 0: RED
                             columns[0].vertical(|ui| {
@@ -715,7 +742,6 @@ impl PlayerlistWindow {
                     .max_size([480.0, 385.0])
                     .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                     .show(ctx, |ui| {
-
                         ui.horizontal(|ui| {
                             ui.strong("Name:");
                             ui.label(&player.name);
@@ -741,7 +767,10 @@ impl PlayerlistWindow {
                             } else {
                                 format!("{:.2}", player.kills as f32 / player.deaths as f32)
                             };
-                            ui.label(format!("{} / {} ({})", player.kills, player.deaths, ratio_str));
+                            ui.label(format!(
+                                "{} / {} ({})",
+                                player.kills, player.deaths, ratio_str
+                            ));
                             ui.add_space(8.0);
                             ui.colored_label(
                                 egui::Color32::from_rgb(160, 160, 160),
@@ -842,4 +871,3 @@ impl PlayerlistWindow {
         }
     }
 }
-

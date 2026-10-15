@@ -1,6 +1,6 @@
+use tf_demo_parser::ParseError;
 use tf_demo_parser::demo::packet::datatable::{ParseSendTable, ServerClass};
 use tf_demo_parser::demo::sendprop::SendPropFlag;
-use tf_demo_parser::ParseError;
 
 /// Source engine specifications and practical limits:
 /// - Official Source engine MAX_DATATABLE_PROPS is 4096.
@@ -15,19 +15,12 @@ pub const MAX_TOTAL_DATATABLE_PROPS: usize = 250_000;
 
 /// Validates that a demo's SendTables and ServerClasses conform to Source engine
 /// limits and do not contain exponential expansion DAG bombs (demo zip bombs).
-pub fn validate_send_tables(
-    tables: &[ParseSendTable],
-    server_classes: &[ServerClass],
-) -> Result<(), ParseError> {
+pub fn validate_send_tables(tables: &[ParseSendTable], server_classes: &[ServerClass]) -> Result<(), ParseError> {
     if tables.len() > MAX_DATATABLES {
-        return Err(ParseError::InvalidDemo(
-            "Too many datatables in demo (exceeds MAX_DATATABLES limit)",
-        ));
+        return Err(ParseError::InvalidDemo("Too many datatables in demo (exceeds MAX_DATATABLES limit)"));
     }
     if server_classes.len() > MAX_SERVER_CLASSES {
-        return Err(ParseError::InvalidDemo(
-            "Too many server classes in demo (exceeds MAX_SERVER_CLASSES limit)",
-        ));
+        return Err(ParseError::InvalidDemo("Too many server classes in demo (exceeds MAX_SERVER_CLASSES limit)"));
     }
 
     let mut total_props: usize = 0;
@@ -50,12 +43,7 @@ pub fn validate_send_tables(
 
 /// Recursively computes an upper bound on flattened properties without allocating memory.
 /// Immediately aborts if property count exceeds MAX_DATATABLE_PROPS or if depth exceeds MAX_DATATABLE_DEPTH.
-fn count_table_props<'a>(
-    table: &'a ParseSendTable,
-    tables: &'a [ParseSendTable],
-    stack: &mut Vec<&'a str>,
-    count: &mut usize,
-) -> Result<(), ParseError> {
+fn count_table_props<'a>(table: &'a ParseSendTable, tables: &'a [ParseSendTable], stack: &mut Vec<&'a str>, count: &mut usize) -> Result<(), ParseError> {
     if stack.len() >= MAX_DATATABLE_DEPTH {
         return Err(ParseError::InvalidDemo(
             "DataTable nesting depth exceeded safe limit (recursion or cycle detected)",
@@ -64,9 +52,7 @@ fn count_table_props<'a>(
 
     let table_name = table.name.as_str();
     if stack.contains(&table_name) {
-        return Err(ParseError::InvalidDemo(
-            "Cyclic DataTable reference detected in demo",
-        ));
+        return Err(ParseError::InvalidDemo("Cyclic DataTable reference detected in demo"));
     }
 
     stack.push(table_name);
@@ -81,9 +67,7 @@ fn count_table_props<'a>(
         } else {
             *count += 1;
             if *count > MAX_DATATABLE_PROPS {
-                return Err(ParseError::InvalidDemo(
-                    "DataTable property expansion limit exceeded (potential demo zip bomb)",
-                ));
+                return Err(ParseError::InvalidDemo("DataTable property expansion limit exceeded (potential demo zip bomb)"));
             }
         }
     }
@@ -92,13 +76,12 @@ fn count_table_props<'a>(
     Ok(())
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use tf_demo_parser::demo::packet::datatable::SendTableName;
-    use tf_demo_parser::demo::sendprop::{
-        RawSendPropDefinition, SendPropFlags, SendPropIdentifier, SendPropType,
-    };
+    use tf_demo_parser::demo::sendprop::{RawSendPropDefinition, SendPropFlags, SendPropIdentifier, SendPropType};
 
     fn create_leaf_prop(owner: &'static str, name: &'static str) -> RawSendPropDefinition {
         RawSendPropDefinition {
@@ -116,11 +99,7 @@ mod tests {
         }
     }
 
-    fn create_dt_prop(
-        owner: &'static str,
-        prop_name: &'static str,
-        target_table: &'static str,
-    ) -> RawSendPropDefinition {
+    fn create_dt_prop(owner: &'static str, prop_name: &'static str, target_table: &'static str) -> RawSendPropDefinition {
         RawSendPropDefinition {
             prop_type: SendPropType::DataTable,
             name: prop_name.into(),

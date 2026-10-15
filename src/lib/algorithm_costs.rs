@@ -116,7 +116,7 @@ const WORKER_COUNT_TOLERANCE: f64 = 1.05;
 /// own, so beyond some point extra workers only sit idle.
 pub fn worker_count(costs: &[f64]) -> usize {
     let logical = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let max_workers = num_cpus::get_physical().min(logical).min(costs.len()).min(crate::MAX_WORKERS).max(1);
+    let max_workers = num_cpus::get_physical().min(logical).min(costs.len()).clamp(1, crate::MAX_WORKERS);
 
     let slowest: Vec<f64> = (1..=max_workers).map(|workers| slowest_worker(costs, workers)).collect();
     let best = slowest.iter().copied().fold(f64::INFINITY, f64::min);
@@ -144,7 +144,7 @@ pub fn assign_workers(costs: &[f64], workers: usize) -> Vec<usize> {
     let mut loads = vec![0.0f64; workers.max(1)];
     let mut assignment = vec![0; costs.len()];
     for index in order {
-        let (worker, _) = loads.iter().enumerate().min_by(|a, b| a.1.total_cmp(b.1)).unwrap();
+        let (worker, _) = loads.iter().enumerate().min_by(|a, b| a.1.total_cmp(b.1)).expect("loads must not be empty");
         loads[worker] += costs[index];
         assignment[index] = worker;
     }

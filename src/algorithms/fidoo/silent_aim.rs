@@ -436,7 +436,7 @@ impl CheatAlgorithm for SilentAim {
 
             // Classify weapon
             let weapon_name = state.get_player_weapon(player);
-            let weapon_category = Self::classify_weapon(&weapon_name);
+            let weapon_category = Self::classify_weapon(weapon_name);
 
             // Skip excluded non-damaging utility/mobility tools (healing beams, jumper training tools, parachutes)
             if weapon_category == WeaponCategory::Excluded {
@@ -487,7 +487,7 @@ impl CheatAlgorithm for SilentAim {
                 }
 
                 // Specifically filter downward rocket jumping (Soldier + Rocket Launcher + pitch > 65°)
-                if Self::is_rocket_jump_context(class_name, &weapon_name, curr_snap.angle.pitch, anchor_snap.angle.pitch) {
+                if Self::is_rocket_jump_context(class_name, weapon_name, curr_snap.angle.pitch, anchor_snap.angle.pitch) {
                     continue;
                 }
 

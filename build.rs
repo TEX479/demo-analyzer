@@ -1,7 +1,11 @@
+#[cfg(not(feature = "static_algorithms_module"))]
 use std::env;
+#[cfg(not(feature = "static_algorithms_module"))]
 use std::fs;
+#[cfg(not(feature = "static_algorithms_module"))]
 use std::path::Path;
 
+#[cfg(not(feature = "static_algorithms_module"))]
 fn extract_struct_name(content: &str) -> Option<String> {
     // Look for `impl ... CheatAlgorithm ... for StructName`
     for line in content.lines() {
@@ -31,6 +35,7 @@ fn extract_struct_name(content: &str) -> Option<String> {
     None
 }
 
+#[cfg(not(feature = "static_algorithms_module"))]
 fn write_if_changed(path: &Path, content: &str) {
     if let Ok(existing) = fs::read_to_string(path)
         && existing == content
@@ -42,6 +47,7 @@ fn write_if_changed(path: &Path, content: &str) {
 }
 
 /// FNV-1a hash of an algorithm's source file, used to reset its learned cost when it changes.
+#[cfg(not(feature = "static_algorithms_module"))]
 fn source_hash(folder_path: &Path, module: &str) -> u64 {
     let content = fs::read(folder_path.join(format!("{}.rs", module))).unwrap_or_default();
     content
@@ -49,6 +55,7 @@ fn source_hash(folder_path: &Path, module: &str) -> u64 {
         .fold(0xcbf29ce484222325u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3))
 }
 
+#[cfg(not(feature = "static_algorithms_module"))]
 fn scan_folder(folder_path: &Path) -> Vec<(String, String)> {
     let mut results = Vec::new();
     if folder_path.exists()
@@ -73,6 +80,7 @@ fn scan_folder(folder_path: &Path) -> Vec<(String, String)> {
     results
 }
 
+#[cfg(not(feature = "static_algorithms_module"))]
 fn parse_selected_experimental_algos(manifest_dir: &Path) -> (bool, Vec<String>) {
     if env::var("CARGO_FEATURE_EXPERIMENTAL").is_ok() {
         return (true, Vec::new());
@@ -155,6 +163,7 @@ fn parse_selected_experimental_algos(manifest_dir: &Path) -> (bool, Vec<String>)
     (false, tokens)
 }
 
+#[cfg(not(feature = "static_algorithms_module"))]
 fn matches_algo(category: &str, stem: &str, struct_name: &str, tokens: &[String]) -> bool {
     let full_name = if category.is_empty() {
         stem.to_string()
@@ -197,6 +206,7 @@ fn matches_algo(category: &str, stem: &str, struct_name: &str, tokens: &[String]
     false
 }
 
+#[cfg(not(feature = "static_algorithms_module"))]
 fn main() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let out_dir = env::var("OUT_DIR").expect("output directory for intermediate build scripts must be known");
@@ -467,3 +477,6 @@ pub const EXPERIMENTAL_SOURCE_HASHES: &[u64] = {};
         }
     }
 }
+
+#[cfg(feature = "static_algorithms_module")]
+fn main() {}

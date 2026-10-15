@@ -105,7 +105,11 @@ pub fn reconstruct_simtick(server_tick: i64, entindex: i64, value: i64) -> i64 {
 
 use tf_demo_parser::demo::parser::analyser::Class;
 
-pub fn weapon_name_from_id_or_class(item_def: Option<u16>, class_name: &str, player_class: Class) -> String {
+pub fn weapon_name_from_id_or_class(
+    item_def: Option<u16>,
+    class_name: &str,
+    player_class: Class,
+) -> &str {
     if let Some(id) = item_def {
         let name = match id {
             0 | 190 | 221 => match player_class {
@@ -303,50 +307,54 @@ pub fn weapon_name_from_id_or_class(item_def: Option<u16>, class_name: &str, pla
             _ => "",
         };
         if !name.is_empty() {
-            return name.to_string();
+            return name;
         }
     }
 
-    let clean = class_name.strip_prefix("CTF").or_else(|| class_name.strip_prefix("C")).unwrap_or(class_name);
+    let clean = class_name
+        .strip_prefix("CTF")
+        .or_else(|| class_name.strip_prefix("C"))
+        .unwrap_or(class_name);
     let clean = clean.strip_prefix("Weapon").unwrap_or(clean);
 
     match clean {
-        "ScatterGun" | "Scattergun" => "Scattergun".to_string(),
-        "Minigun" => "Minigun".to_string(),
-        "SniperRifle" => "Sniper Rifle".to_string(),
-        "SniperRifleDecap" => "Bazaar Bargain".to_string(),
-        "CompoundBow" => "Huntsman".to_string(),
-        "RocketLauncher_AirStrike" | "RocketLauncher_Airstrike" => "Air Strike".to_string(),
-        "RocketLauncher_DirectHit" => "Direct Hit".to_string(),
-        "RocketLauncher" => "Rocket Launcher".to_string(),
-        "PipebombLauncher" => "Stickybomb Launcher".to_string(),
-        "GrenadeLauncher" => "Grenade Launcher".to_string(),
-        "Cannon" => "Loose Cannon".to_string(),
-        "Knife" => "Knife".to_string(),
-        "Revolver" => "Revolver".to_string(),
-        "Medigun" => "Medi Gun".to_string(),
-        "FlameThrower" => "Flame Thrower".to_string(),
-        "Pistol" | "Pistol_Scout" | "Pistol_ScoutPrimary" | "Pistol_ScoutSecondary" => "Pistol".to_string(),
-        "Shotgun" | "Shotgun_Soldier" | "Shotgun_Pyro" | "Shotgun_HWG" | "Shotgun_Engineer" | "Shotgun_Primary" => "Shotgun".to_string(),
-        "Wrench" => "Wrench".to_string(),
-        "Bonesaw" => "Bonesaw".to_string(),
-        "Club" => "Kukri".to_string(),
-        "Sword" => "Eyelander".to_string(),
-        "Shovel" => "Shovel".to_string(),
-        "FireAxe" => "Fire Axe".to_string(),
-        "Bat" | "Bat_Wood" | "Bat_Fish" | "Bat_Giftwrap" => "Bat".to_string(),
-        "Fists" => "Fists".to_string(),
-        "SyringeGun" => "Syringe Gun".to_string(),
-        "Crossbow" => "Crusader's Crossbow".to_string(),
-        "SMG" => "SMG".to_string(),
-        "Jar" | "JarMilk" | "JarGas" => "Jarate".to_string(),
-        "BuffItem" => "Buff Banner".to_string(),
-        "LunchBox" | "LunchBox_Drink" => "Sandvich".to_string(),
-        "LaserPointer" => "Wrangler".to_string(),
-        "Sapper" => "Sapper".to_string(),
-        "Invis" => "Invis Watch".to_string(),
-        "" => "unknown".to_string(),
-        other => other.to_string(),
+        "ScatterGun" | "Scattergun" => "Scattergun",
+        "Minigun" => "Minigun",
+        "SniperRifle" => "Sniper Rifle",
+        "SniperRifleDecap" => "Bazaar Bargain",
+        "CompoundBow" => "Huntsman",
+        "RocketLauncher_AirStrike" | "RocketLauncher_Airstrike" => "Air Strike",
+        "RocketLauncher_DirectHit" => "Direct Hit",
+        "RocketLauncher" => "Rocket Launcher",
+        "PipebombLauncher" => "Stickybomb Launcher",
+        "GrenadeLauncher" => "Grenade Launcher",
+        "Cannon" => "Loose Cannon",
+        "Knife" => "Knife",
+        "Revolver" => "Revolver",
+        "Medigun" => "Medi Gun",
+        "FlameThrower" => "Flame Thrower",
+        "Pistol" | "Pistol_Scout" | "Pistol_ScoutPrimary" | "Pistol_ScoutSecondary" => "Pistol",
+        "Shotgun" | "Shotgun_Soldier" | "Shotgun_Pyro" | "Shotgun_HWG" | "Shotgun_Engineer"
+        | "Shotgun_Primary" => "Shotgun",
+        "Wrench" => "Wrench",
+        "Bonesaw" => "Bonesaw",
+        "Club" => "Kukri",
+        "Sword" => "Eyelander",
+        "Shovel" => "Shovel",
+        "FireAxe" => "Fire Axe",
+        "Bat" | "Bat_Wood" | "Bat_Fish" | "Bat_Giftwrap" => "Bat",
+        "Fists" => "Fists",
+        "SyringeGun" => "Syringe Gun",
+        "Crossbow" => "Crusader's Crossbow",
+        "SMG" => "SMG",
+        "Jar" | "JarMilk" | "JarGas" => "Jarate",
+        "BuffItem" => "Buff Banner",
+        "LunchBox" | "LunchBox_Drink" => "Sandvich",
+        "LaserPointer" => "Wrangler",
+        "Sapper" => "Sapper",
+        "Invis" => "Invis Watch",
+        "" => "unknown",
+        other => other,
     }
 }
 
@@ -357,21 +365,44 @@ pub fn get_steam_install_path() -> Option<std::path::PathBuf> {
 
     #[link(name = "advapi32")]
     extern "system" {
-        fn RegOpenKeyExW(hKey: usize, lpSubKey: *const u16, ulOptions: u32, samDesired: u32, phkResult: *mut usize) -> i32;
-        fn RegQueryValueExW(hKey: usize, lpValueName: *const u16, lpReserved: *mut u32, lpType: *mut u32, lpData: *mut u8, lpcbData: *mut u32) -> i32;
+        fn RegOpenKeyExW(
+            hKey: usize,
+            lpSubKey: *const u16,
+            ulOptions: u32,
+            samDesired: u32,
+            phkResult: *mut usize,
+        ) -> i32;
+        fn RegQueryValueExW(
+            hKey: usize,
+            lpValueName: *const u16,
+            lpReserved: *mut u32,
+            lpType: *mut u32,
+            lpData: *mut u8,
+            lpcbData: *mut u32,
+        ) -> i32;
         fn RegCloseKey(hKey: usize) -> i32;
     }
 
     const HKEY_LOCAL_MACHINE: usize = 0x80000002;
     const KEY_READ: u32 = 0x20019;
 
-    let subkeys = ["SOFTWARE\\WOW6432Node\\Valve\\Steam\0", "SOFTWARE\\Valve\\Steam\0"];
+    let subkeys = [
+        "SOFTWARE\\WOW6432Node\\Valve\\Steam\0",
+        "SOFTWARE\\Valve\\Steam\0",
+    ];
 
     for subkey in subkeys {
         let wide_subkey: Vec<u16> = subkey.encode_utf16().collect();
         let mut hkey = 0usize;
         unsafe {
-            if RegOpenKeyExW(HKEY_LOCAL_MACHINE, wide_subkey.as_ptr(), 0, KEY_READ, &mut hkey) == 0 {
+            if RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                wide_subkey.as_ptr(),
+                0,
+                KEY_READ,
+                &mut hkey,
+            ) == 0
+            {
                 let val_name: Vec<u16> = "InstallPath\0".encode_utf16().collect();
                 let mut buf_len = 0u32;
                 if RegQueryValueExW(
@@ -395,8 +426,12 @@ pub fn get_steam_install_path() -> Option<std::path::PathBuf> {
                     ) == 0
                     {
                         RegCloseKey(hkey);
-                        let u16_slice: &[u16] = std::slice::from_raw_parts(data.as_ptr() as *const u16, data.len() / 2);
-                        let end = u16_slice.iter().position(|&c| c == 0).unwrap_or(u16_slice.len());
+                        let u16_slice: &[u16] =
+                            std::slice::from_raw_parts(data.as_ptr() as *const u16, data.len() / 2);
+                        let end = u16_slice
+                            .iter()
+                            .position(|&c| c == 0)
+                            .unwrap_or(u16_slice.len());
                         let os_str = OsString::from_wide(&u16_slice[..end]);
                         return Some(std::path::PathBuf::from(os_str));
                     }
@@ -411,13 +446,22 @@ pub fn get_steam_install_path() -> Option<std::path::PathBuf> {
 #[cfg(not(windows))]
 pub fn get_steam_install_path() -> Option<std::path::PathBuf> {
     std::env::var("HOME")
-        .map(|home| std::path::Path::new(&home).join(".local").join("share").join("Steam"))
+        .map(|home| {
+            std::path::Path::new(&home)
+                .join(".local")
+                .join("share")
+                .join("Steam")
+        })
         .ok()
 }
 
 fn resolve_tf2_demos_dir(tf_dir: std::path::PathBuf) -> std::path::PathBuf {
     let demos_sub = tf_dir.join("demos");
-    if demos_sub.is_dir() { demos_sub } else { tf_dir }
+    if demos_sub.is_dir() {
+        demos_sub
+    } else {
+        tf_dir
+    }
 }
 
 pub fn find_default_tf2_dir() -> Option<std::path::PathBuf> {
@@ -425,10 +469,14 @@ pub fn find_default_tf2_dir() -> Option<std::path::PathBuf> {
     if let Ok(dir) = std::env::var("TF2_DIR") {
         let p = std::path::PathBuf::from(dir);
         if p.is_dir() {
-            if p.file_name().map_or(false, |n| n.to_string_lossy().eq_ignore_ascii_case("demos")) {
+            if p.file_name()
+                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("demos"))
+            {
                 return Some(p);
             }
-            if p.file_name().map_or(false, |n| n.to_string_lossy().eq_ignore_ascii_case("tf")) {
+            if p.file_name()
+                .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("tf"))
+            {
                 return Some(resolve_tf2_demos_dir(p));
             }
             let tf_sub = p.join("tf");
@@ -443,19 +491,26 @@ pub fn find_default_tf2_dir() -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     {
         // 2a. Common standard install locations
-        let common = std::path::PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf");
+        let common = std::path::PathBuf::from(
+            r"C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf",
+        );
         if common.is_dir() {
             return Some(resolve_tf2_demos_dir(common));
         }
 
-        let common_pf = std::path::PathBuf::from(r"C:\Program Files\Steam\steamapps\common\Team Fortress 2\tf");
+        let common_pf =
+            std::path::PathBuf::from(r"C:\Program Files\Steam\steamapps\common\Team Fortress 2\tf");
         if common_pf.is_dir() {
             return Some(resolve_tf2_demos_dir(common_pf));
         }
 
         // 2b. From Steam install path via registry
         if let Some(steam_path) = get_steam_install_path() {
-            let tf2 = steam_path.join("steamapps").join("common").join("Team Fortress 2").join("tf");
+            let tf2 = steam_path
+                .join("steamapps")
+                .join("common")
+                .join("Team Fortress 2")
+                .join("tf");
             if tf2.is_dir() {
                 return Some(resolve_tf2_demos_dir(tf2));
             }
@@ -470,8 +525,13 @@ pub fn find_default_tf2_dir() -> Option<std::path::PathBuf> {
                             if let Some(second_quote) = trimmed[first_quote + 1..].find('"') {
                                 let rem = &trimmed[first_quote + 1 + second_quote + 1..];
                                 let path_val = rem.trim().trim_matches('"');
-                                let lib_folder = std::path::PathBuf::from(path_val.replace(r"\\", r"\"));
-                                let tf2_lib = lib_folder.join("steamapps").join("common").join("Team Fortress 2").join("tf");
+                                let lib_folder =
+                                    std::path::PathBuf::from(path_val.replace(r"\\", r"\"));
+                                let tf2_lib = lib_folder
+                                    .join("steamapps")
+                                    .join("common")
+                                    .join("Team Fortress 2")
+                                    .join("tf");
                                 if tf2_lib.is_dir() {
                                     return Some(resolve_tf2_demos_dir(tf2_lib));
                                 }
@@ -485,9 +545,15 @@ pub fn find_default_tf2_dir() -> Option<std::path::PathBuf> {
         // 2d. Common secondary drive paths
         for drive in ["D", "E", "F", "G"] {
             for sub in [
-                format!(r"{}:\SteamLibrary\steamapps\common\Team Fortress 2\tf", drive),
+                format!(
+                    r"{}:\SteamLibrary\steamapps\common\Team Fortress 2\tf",
+                    drive
+                ),
                 format!(r"{}:\Steam\steamapps\common\Team Fortress 2\tf", drive),
-                format!(r"{}:\Games\Steam\steamapps\common\Team Fortress 2\tf", drive),
+                format!(
+                    r"{}:\Games\Steam\steamapps\common\Team Fortress 2\tf",
+                    drive
+                ),
             ] {
                 let p = std::path::PathBuf::from(sub);
                 if p.is_dir() {
@@ -506,7 +572,8 @@ pub fn find_default_tf2_dir() -> Option<std::path::PathBuf> {
                 home_p.join(".local/share/Steam/steamapps/common/Team Fortress 2/tf"),
                 home_p.join(".steam/steam/steamapps/common/Team Fortress 2/tf"),
                 home_p.join(".steam/root/steamapps/common/Team Fortress 2/tf"),
-                home_p.join("Library/Application Support/Steam/steamapps/common/Team Fortress 2/tf"),
+                home_p
+                    .join("Library/Application Support/Steam/steamapps/common/Team Fortress 2/tf"),
             ];
             for c in candidates {
                 if c.is_dir() {
@@ -536,7 +603,8 @@ pub fn format_sus_demo_filename(original_filename: &str, flags_count: usize) -> 
             let inner_parts: Vec<&str> = inner.split_whitespace().collect();
             if inner_parts.len() == 2
                 && inner_parts[0].chars().all(|c| c.is_ascii_digit())
-                && (inner_parts[1].eq_ignore_ascii_case("flag") || inner_parts[1].eq_ignore_ascii_case("flags"))
+                && (inner_parts[1].eq_ignore_ascii_case("flag")
+                    || inner_parts[1].eq_ignore_ascii_case("flags"))
             {
                 &stem[..open_paren]
             } else {
@@ -561,11 +629,13 @@ pub fn read_demo_header_info(path: &Path) -> Result<(String, f32), String> {
     let file_bytes = std::fs::read(path).map_err(|e| format!("Failed to read demo: {e}"))?;
     let demo = Demo::new(&file_bytes);
     let mut stream = demo.get_stream();
-    let header = Header::read(&mut stream).map_err(|e| format!("Failed to read demo header: {e}"))?;
+    let header =
+        Header::read(&mut stream).map_err(|e| format!("Failed to read demo header: {e}"))?;
     Ok((header.map, header.duration))
 }
 
 /// Finds the TF2 replay storage directory (`tf/replay/client/replays`) relative to the demo or via Steam install paths.
+// TODO: replace with steamlocate
 pub fn find_tf2_replays_dir(demo_path: &Path) -> Option<PathBuf> {
     // 1. Check ancestors of demo_path
     for ancestor in demo_path.ancestors() {
@@ -588,13 +658,18 @@ pub fn find_tf2_replays_dir(demo_path: &Path) -> Option<PathBuf> {
     // 2. Check standard Steam library locations
     #[cfg(windows)]
     {
-        let common = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf\replay\client\replays");
+        let common = PathBuf::from(
+            r"C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf\replay\client\replays",
+        );
         if common.is_dir() || common.parent().map_or(false, |p| p.is_dir()) {
             return Some(common);
         }
 
         if let Some(steam_path) = get_steam_install_path() {
-            let tf2 = steam_path.join("steamapps").join("common").join("Team Fortress 2");
+            let tf2 = steam_path
+                .join("steamapps")
+                .join("common")
+                .join("Team Fortress 2");
             if tf2.is_dir() {
                 return Some(tf2.join("tf").join("replay").join("client").join("replays"));
             }
@@ -608,9 +683,18 @@ pub fn find_tf2_replays_dir(demo_path: &Path) -> Option<PathBuf> {
                                 let rem = &trimmed[first_quote + 1 + second_quote + 1..];
                                 let path_val = rem.trim().trim_matches('"');
                                 let lib_folder = PathBuf::from(path_val.replace(r"\\", r"\"));
-                                let tf2_lib = lib_folder.join("steamapps").join("common").join("Team Fortress 2");
+                                let tf2_lib = lib_folder
+                                    .join("steamapps")
+                                    .join("common")
+                                    .join("Team Fortress 2");
                                 if tf2_lib.is_dir() {
-                                    return Some(tf2_lib.join("tf").join("replay").join("client").join("replays"));
+                                    return Some(
+                                        tf2_lib
+                                            .join("tf")
+                                            .join("replay")
+                                            .join("client")
+                                            .join("replays"),
+                                    );
                                 }
                             }
                         }
@@ -621,11 +705,11 @@ pub fn find_tf2_replays_dir(demo_path: &Path) -> Option<PathBuf> {
     }
 
     // 3. Fallback to default TF2 dir if known
-    if let Some(demos_dir) = find_default_tf2_dir() {
-        if let Some(tf_dir) = demos_dir.parent() {
-            let replays = tf_dir.join("replay").join("client").join("replays");
-            return Some(replays);
-        }
+    if let Some(demos_dir) = find_default_tf2_dir()
+        && let Some(tf_dir) = demos_dir.parent()
+    {
+        let replays = tf_dir.join("replay").join("client").join("replays");
+        return Some(replays);
     }
 
     None
@@ -647,11 +731,13 @@ pub fn find_tf2_replays_dir(demo_path: &Path) -> Option<PathBuf> {
 ///
 /// Zeroing ticks on all packets before `dem_synctick` (command 3) ensures that playback tick
 /// starts at 0, allowing seeking to any tick in the demo without breaking demo parsing or checksums.
+#[warn(clippy::unwrap_used)]
 pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
     const DEMO_HEADER_SIZE: usize = 1072;
     const DEM_HEADER_MAGIC: &[u8; 8] = b"HL2DEMO\0";
 
-    let mut data = std::fs::read(demo_path).map_err(|e| format!("Failed to read demo for signon tick sanitization: {e}"))?;
+    let mut data = std::fs::read(demo_path)
+        .map_err(|e| format!("Failed to read demo for signon tick sanitization: {e}"))?;
 
     if data.len() < DEMO_HEADER_SIZE {
         return Err("File is too small to be a valid Source demo".to_string());
@@ -660,7 +746,11 @@ pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
         return Err("Not a valid HL2DEMO file (bad magic)".to_string());
     }
 
-    let demo_protocol = i32::from_le_bytes(data[8..12].try_into().map_err(|_| "Failed to read demo protocol".to_string())?);
+    let demo_protocol = i32::from_le_bytes(
+        data[8..12]
+            .try_into()
+            .map_err(|_| "Failed to read demo protocol".to_string())?,
+    );
     let has_slot = demo_protocol >= 4;
 
     let mut off = DEMO_HEADER_SIZE;
@@ -668,7 +758,7 @@ pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
     let mut modified_count = 0;
 
     while off < n {
-        let cmd = data[off];
+        let [cmd] = read_exact(&data, off).map_err(|e| format!("could not read cmd: {e}"))?;
         off += 1;
 
         if cmd == 7 {
@@ -676,16 +766,17 @@ pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
             break;
         }
 
-        if off + 4 > n {
-            return Err(format!("Unexpected EOF reading tick at offset {off}"));
-        }
         let tick_offset = off;
-        let tick_val = i32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+        let tick_val = i32::from_le_bytes(
+            read_exact(&data, off).map_err(|e| format!("could not read tick_val: {e}"))?,
+        );
         off += 4;
 
         if has_slot {
             if off + 1 > n {
-                return Err(format!("Unexpected EOF reading player slot at offset {off}"));
+                return Err(format!(
+                    "Unexpected EOF reading player slot at offset {off}"
+                ));
             }
             off += 1;
         }
@@ -704,11 +795,10 @@ pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
         match cmd {
             1 | 2 => {
                 // DEM_SIGNON / DEM_PACKET: democmdinfo (76) + in_seq (4) + out_seq (4) = 84 bytes
-                if off + 84 + 4 > n {
-                    return Err(format!("Unexpected EOF reading packet header at offset {off}"));
-                }
                 off += 84;
-                let length = i32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+                let length = i32::from_le_bytes(
+                    read_exact(&data, off).map_err(|e| format!("could not read length: {e}"))?,
+                );
                 off += 4;
                 if length < 0 || off + (length as usize) > n {
                     return Err(format!("Invalid packet length {length} at offset {off}"));
@@ -717,26 +807,33 @@ pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
             }
             4 | 6 | 8 => {
                 // DEM_CONSOLECMD / DEM_DATATABLES / DEM_STRINGTABLES
-                if off + 4 > n {
-                    return Err(format!("Unexpected EOF reading length for cmd {cmd} at offset {off}"));
-                }
-                let length = i32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+                let length = i32::from_le_bytes(
+                    read_exact(&data, off).map_err(|e| format!("could not read length: {e}"))?,
+                );
                 off += 4;
                 if length < 0 || off + (length as usize) > n {
-                    return Err(format!("Invalid length {length} for cmd {cmd} at offset {off}"));
+                    return Err(format!(
+                        "Invalid length {length} for cmd {cmd} at offset {off}"
+                    ));
                 }
                 off += length as usize;
             }
             5 | 9 => {
                 // DEM_USERCMD / DEM_CUSTOMDATA
                 if off + 8 > n {
-                    return Err(format!("Unexpected EOF reading header for cmd {cmd} at offset {off}"));
+                    return Err(format!(
+                        "Unexpected EOF reading header for cmd {cmd} at offset {off}"
+                    ));
                 }
                 off += 4;
-                let length = i32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+                let length = i32::from_le_bytes(
+                    read_exact(&data, off).map_err(|e| format!("could not read length: {e}"))?,
+                );
                 off += 4;
                 if length < 0 || off + (length as usize) > n {
-                    return Err(format!("Invalid length {length} for cmd {cmd} at offset {off}"));
+                    return Err(format!(
+                        "Invalid length {length} for cmd {cmd} at offset {off}"
+                    ));
                 }
                 off += length as usize;
             }
@@ -747,7 +844,8 @@ pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
     }
 
     if modified_count > 0 {
-        std::fs::write(demo_path, &data).map_err(|e| format!("Failed to write sanitized demo file: {e}"))?;
+        std::fs::write(demo_path, &data)
+            .map_err(|e| format!("Failed to write sanitized demo file: {e}"))?;
     }
 
     Ok(modified_count)
@@ -756,15 +854,22 @@ pub fn sanitize_demo_signon_ticks(demo_path: &Path) -> Result<usize, String> {
 /// Converts a demo file into a TF2 replay entry in `tf/replay/client/replays`.
 /// Copies the demo file, sanitizes signon ticks to enable proper seeking,
 /// updates `replays.dmx`, and writes `replay_{handle}.dmx`.
-pub fn convert_demo_to_replay(demo_path: &Path, header_info: Option<(&str, f32)>) -> Result<u32, String> {
-    let replays_dir = find_tf2_replays_dir(demo_path).ok_or_else(|| "Could not locate TF2 replays folder (tf/replay/client/replays)".to_string())?;
+pub fn convert_demo_to_replay(
+    demo_path: &Path,
+    header_info: Option<(&str, f32)>,
+) -> Result<u32, String> {
+    let replays_dir = find_tf2_replays_dir(demo_path).ok_or_else(|| {
+        "Could not locate TF2 replays folder (tf/replay/client/replays)".to_string()
+    })?;
 
-    std::fs::create_dir_all(&replays_dir).map_err(|e| format!("Failed to create replays directory: {e}"))?;
+    std::fs::create_dir_all(&replays_dir)
+        .map_err(|e| format!("Failed to create replays directory: {e}"))?;
 
     // 1. Ensure replays.dmx index exists
     let index_path = replays_dir.join("replays.dmx");
     if !index_path.exists() {
-        std::fs::write(&index_path, "\"root\"\n{\n\t\"version\"\t\"0\"\n}\n").map_err(|e| format!("Failed to create replays.dmx: {e}"))?;
+        std::fs::write(&index_path, "\"root\"\n{\n\t\"version\"\t\"0\"\n}\n")
+            .map_err(|e| format!("Failed to create replays.dmx: {e}"))?;
     }
 
     let demo_filename = demo_path
@@ -776,7 +881,8 @@ pub fn convert_demo_to_replay(demo_path: &Path, header_info: Option<(&str, f32)>
     // 2. Copy demo file into replays directory and sanitize signon ticks
     let target_demo_path = replays_dir.join(&demo_filename);
     if demo_path != target_demo_path && !target_demo_path.exists() {
-        std::fs::copy(demo_path, &target_demo_path).map_err(|e| format!("Failed to copy demo to replays folder: {e}"))?;
+        std::fs::copy(demo_path, &target_demo_path)
+            .map_err(|e| format!("Failed to copy demo to replays folder: {e}"))?;
     }
 
     if target_demo_path.exists() {
@@ -798,7 +904,9 @@ pub fn convert_demo_to_replay(demo_path: &Path, header_info: Option<(&str, f32)>
 
     let create_date: chrono::DateTime<chrono::Local> = chrono::DateTime::from(file_time);
     use chrono::{Datelike, Timelike};
-    let kv_date = (create_date.day() - 1) | ((create_date.month() - 1) << 5) | ((create_date.year() as u32 - 2009) << 9);
+    let kv_date = (create_date.day() - 1)
+        | ((create_date.month() - 1) << 5)
+        | ((create_date.year() as u32 - 2009) << 9);
     let kv_time = create_date.hour() | (create_date.minute() << 5) | (create_date.second() << 11);
 
     // 5. Generate unique replay handle in 0..i32::MAX
@@ -810,18 +918,33 @@ pub fn convert_demo_to_replay(demo_path: &Path, header_info: Option<(&str, f32)>
     if replay_handle == 0 {
         replay_handle = 1;
     }
-    while replays_dir.join(format!("replay_{replay_handle}.dmx")).exists() {
-        replay_handle = (replay_handle.wrapping_mul(1664525).wrapping_add(1013904223)) & 0x7FFF_FFFF;
+    while replays_dir
+        .join(format!("replay_{replay_handle}.dmx"))
+        .exists()
+    {
+        replay_handle =
+            (replay_handle.wrapping_mul(1664525).wrapping_add(1013904223)) & 0x7FFF_FFFF;
         if replay_handle == 0 {
             replay_handle = 1;
         }
     }
 
     // 6. Write replay_{replay_handle}.dmx
-    let generated = generate_replay_dmx_and_takes(replay_handle, &demo_filename, &map, duration, kv_date, kv_time, None, &[], None);
+    let generated = generate_replay_dmx_and_takes(
+        replay_handle,
+        &demo_filename,
+        &map,
+        duration,
+        kv_date,
+        kv_time,
+        None,
+        &[],
+        None,
+    );
 
     let dmx_path = replays_dir.join(format!("replay_{replay_handle}.dmx"));
-    std::fs::write(&dmx_path, generated.main_dmx_content).map_err(|e| format!("Failed to write replay DMX: {e}"))?;
+    std::fs::write(&dmx_path, generated.main_dmx_content)
+        .map_err(|e| format!("Failed to write replay DMX: {e}"))?;
 
     Ok(replay_handle)
 }
@@ -845,6 +968,7 @@ pub struct GroupedTake {
     pub title: String,
 }
 
+#[warn(clippy::unwrap_used)]
 pub fn group_takes_by_proximity(takes: &[ReplayTakeInput], gap_threshold: u32) -> Vec<GroupedTake> {
     if takes.is_empty() {
         return Vec::new();
@@ -858,10 +982,10 @@ pub fn group_takes_by_proximity(takes: &[ReplayTakeInput], gap_threshold: u32) -
     let mut current_last_tick: u32 = 0;
 
     for take in sorted_takes {
-        if current_group.is_empty() {
-            current_last_tick = take.tick;
-            current_group.push(take);
-        } else if take.player_slot == current_group[0].player_slot && take.tick <= current_last_tick.saturating_add(gap_threshold) {
+        if !(current_group.is_empty()
+            || (take.player_slot == current_group[0].player_slot
+                && take.tick <= current_last_tick.saturating_add(gap_threshold)))
+        {
             current_last_tick = take.tick;
             current_group.push(take);
         } else {
@@ -878,17 +1002,30 @@ pub fn group_takes_by_proximity(takes: &[ReplayTakeInput], gap_threshold: u32) -
     for group in groups {
         let first_take = &group[0];
         let first_tick = first_take.tick;
-        let last_tick = group.last().unwrap().tick;
+        let last_tick = group
+            .last()
+            .expect("if indexing group[0] does not fail, then this won't either")
+            .tick;
         let tick_in = first_tick.saturating_sub(300);
         let tick_out = last_tick.saturating_add(2000);
 
-        let clean_name = first_take.player_name.replace('"', "").replace(['\r', '\n', '\t'], " ");
+        let clean_name = first_take
+            .player_name
+            .replace('"', "")
+            .replace(['\r', '\n', '\t'], " ");
         let clean_name = clean_name.trim();
-        let clean_name = if clean_name.is_empty() { "unknown" } else { clean_name };
+        let clean_name = if clean_name.is_empty() {
+            "unknown"
+        } else {
+            clean_name
+        };
 
         let mut unique_algos: Vec<String> = Vec::new();
         for t in &group {
-            let clean_algo = t.algorithm.replace('"', "").replace(['\r', '\n', '\t'], " ");
+            let clean_algo = t
+                .algorithm
+                .replace('"', "")
+                .replace(['\r', '\n', '\t'], " ");
             let clean_algo = clean_algo.trim().to_string();
             if !clean_algo.is_empty() && !unique_algos.contains(&clean_algo) {
                 unique_algos.push(clean_algo);
@@ -958,9 +1095,18 @@ pub fn generate_replay_dmx_and_takes(
             let tick_in = take.tick_in;
             let tick_out = take.tick_out;
             let title = &take.title;
-            let target_slot = if !take.player_slot.is_empty() { &take.player_slot } else { player_slot_val };
+            let target_slot = if !take.player_slot.is_empty() {
+                &take.player_slot
+            } else {
+                player_slot_val
+            };
 
-            let ent_idx = target_slot.parse::<i32>().ok().filter(|&s| s >= 0).map(|s| s + 1).unwrap_or(1);
+            let ent_idx = target_slot
+                .parse::<i32>()
+                .ok()
+                .filter(|&s| s >= 0)
+                .map(|s| s + 1)
+                .unwrap_or(1);
 
             let time_in_sec = (tick_in as f64) * 0.015151515;
 
@@ -1045,6 +1191,21 @@ pub fn generate_replay_dmx_and_takes(
     }
 }
 
+fn read_exact<const N: usize, T>(data: &[T], offset: usize) -> Result<[T; N], String>
+where
+    [T; N]: Default,
+    T: Copy,
+{
+    let mut buffer: [T; N] = Default::default();
+    for (i, field) in buffer.iter_mut().enumerate() {
+        *field = *data.get(i + offset).ok_or(format!(
+            "could not read byte at {}: early end of data stream",
+            i + offset
+        ))?;
+    }
+    Ok(buffer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1074,18 +1235,50 @@ mod tests {
 
     #[test]
     fn test_format_sus_demo_filename() {
-        assert_eq!(format_sus_demo_filename("demo.dem", 10), "demo(10 flags).dem");
-        assert_eq!(format_sus_demo_filename("demo(10 flags).dem", 12), "demo(12 flags).dem");
-        assert_eq!(format_sus_demo_filename("demo(1 flag).dem", 5), "demo(5 flags).dem");
-        assert_eq!(format_sus_demo_filename("match.cp_badlands.dem", 3), "match.cp_badlands(3 flags).dem");
-        assert_eq!(format_sus_demo_filename("standalone", 1), "standalone(1 flags).dem");
-        assert_eq!(format_sus_demo_filename("demo(scout).dem", 2), "demo(scout)(2 flags).dem");
+        assert_eq!(
+            format_sus_demo_filename("demo.dem", 10),
+            "demo(10 flags).dem"
+        );
+        assert_eq!(
+            format_sus_demo_filename("demo(10 flags).dem", 12),
+            "demo(12 flags).dem"
+        );
+        assert_eq!(
+            format_sus_demo_filename("demo(1 flag).dem", 5),
+            "demo(5 flags).dem"
+        );
+        assert_eq!(
+            format_sus_demo_filename("match.cp_badlands.dem", 3),
+            "match.cp_badlands(3 flags).dem"
+        );
+        assert_eq!(
+            format_sus_demo_filename("standalone", 1),
+            "standalone(1 flags).dem"
+        );
+        assert_eq!(
+            format_sus_demo_filename("demo(scout).dem", 2),
+            "demo(scout)(2 flags).dem"
+        );
     }
 
     #[test]
     fn test_generate_replay_dmx_no_takes() {
-        let generated = generate_replay_dmx_and_takes(12345, "test.dem", "cp_badlands", 120.0, 1, 2, None, &[], None);
-        assert!(generated.main_dmx_content.contains("\"player_slot\"\t\"-1\""));
+        let generated = generate_replay_dmx_and_takes(
+            12345,
+            "test.dem",
+            "cp_badlands",
+            120.0,
+            1,
+            2,
+            None,
+            &[],
+            None,
+        );
+        assert!(
+            generated
+                .main_dmx_content
+                .contains("\"player_slot\"\t\"-1\"")
+        );
         assert!(!generated.main_dmx_content.contains("\"edits\""));
         assert!(generated.takes.is_empty());
     }
@@ -1120,11 +1313,27 @@ mod tests {
         );
 
         // Check main DMX
-        assert!(generated.main_dmx_content.contains("\"player_slot\"\t\"3\""));
-        assert!(generated.main_dmx_content.contains("\"title\"\t\"SuspectOne (match.dem)\""));
+        assert!(
+            generated
+                .main_dmx_content
+                .contains("\"player_slot\"\t\"3\"")
+        );
+        assert!(
+            generated
+                .main_dmx_content
+                .contains("\"title\"\t\"SuspectOne (match.dem)\"")
+        );
         assert!(generated.main_dmx_content.contains("\"edits\""));
-        assert!(generated.main_dmx_content.contains("\"filename\"\t\t\"replay_99999_edit_0.dmx\""));
-        assert!(generated.main_dmx_content.contains("\"filename\"\t\t\"replay_99999_edit_1.dmx\""));
+        assert!(
+            generated
+                .main_dmx_content
+                .contains("\"filename\"\t\t\"replay_99999_edit_0.dmx\"")
+        );
+        assert!(
+            generated
+                .main_dmx_content
+                .contains("\"filename\"\t\t\"replay_99999_edit_1.dmx\"")
+        );
         assert_eq!(generated.takes.len(), 2);
 
         // Check take 0 (first sorted is tick 100: tick_in = 0, time_in_sec = 0.000000, tick_out = 2100)
@@ -1230,7 +1439,11 @@ mod tests {
             None,
         );
 
-        assert!(generated.main_dmx_content.contains("\"player_slot\"\t\"-1\""));
+        assert!(
+            generated
+                .main_dmx_content
+                .contains("\"player_slot\"\t\"-1\"")
+        );
         assert_eq!(generated.takes.len(), 2);
 
         // Take 0 target slot is 3 -> ent 4
@@ -1268,18 +1481,25 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let test_path = temp_dir.join(format!(
             "test_sanitize_{}.dem",
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
         ));
-        std::fs::write(&test_path, &mock_data).unwrap();
+        std::fs::write(&test_path, &mock_data).expect("test file must be writable");
 
         let modified = sanitize_demo_signon_ticks(&test_path).expect("Sanitization should succeed");
         assert_eq!(modified, 1, "Should have sanitized 1 packet tick");
 
-        let updated_data = std::fs::read(&test_path).unwrap();
+        let updated_data = std::fs::read(&test_path).expect("test file must be readable");
         let _ = std::fs::remove_file(&test_path);
 
         // Check that the tick of Frame 0 is now 0
-        let tick_frame0 = i32::from_le_bytes(updated_data[1073..1077].try_into().unwrap());
+        let tick_frame0 = i32::from_le_bytes(
+            updated_data[1073..1077]
+                .try_into()
+                .expect("test file must contain valid data"),
+        );
         assert_eq!(tick_frame0, 0, "Signon packet tick should be zeroed");
     }
 }

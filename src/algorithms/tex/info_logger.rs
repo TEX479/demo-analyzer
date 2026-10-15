@@ -80,6 +80,7 @@ impl CheatAlgorithm for Logger {
                             .map(|x| x.to_owned())
                             .unwrap_or(format!("{}/{}", u64::from(sid), sid.steam3()));
                         tracing::info!("{} switched to {}", player_name, class);
+                        // println!("{} switched to {}", player_name, class);
                     }
                 }
                 // TODO: maybe work out how this can be added
@@ -96,6 +97,7 @@ impl CheatAlgorithm for Logger {
                             .map(|x| x.to_owned())
                             .unwrap_or(format!("{}/{}", u64::from(sid), sid.steam3()));
                         tracing::info!("{} switched to {}", player_name, class);
+                        // println!("{} switched to {}", player_name, class);
                     }
                 }
                 GameEvent::VoteStarted(e) if self.params.votes => {

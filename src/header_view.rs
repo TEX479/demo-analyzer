@@ -1,8 +1,8 @@
-use std::path::Path;
 use anyhow::{Context, Result};
 use bitbuffer::BitRead;
 #[cfg(feature = "gui")]
 use eframe::egui;
+use std::path::Path;
 
 use tf_demo_parser::demo::header::Header;
 use tf_demo_parser::demo::message::Message;
@@ -31,16 +31,8 @@ pub struct HeaderData {
 
 impl HeaderData {
     pub fn from_header(header: &Header, file_name: String, server_name: String) -> Self {
-        let avg_tickrate = if header.duration > 0.0 {
-            header.ticks as f32 / header.duration
-        } else {
-            0.0
-        };
-        let avg_framerate = if header.duration > 0.0 {
-            header.frames as f32 / header.duration
-        } else {
-            0.0
-        };
+        let avg_tickrate = if header.duration > 0.0 { header.ticks as f32 / header.duration } else { 0.0 };
+        let avg_framerate = if header.duration > 0.0 { header.frames as f32 / header.duration } else { 0.0 };
 
         Self {
             file_name,
@@ -68,13 +60,11 @@ impl HeaderData {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let file_bytes = std::fs::read(path_ref)
-            .with_context(|| format!("Failed to read demo file: {:?}", path_ref))?;
+        let file_bytes = std::fs::read(path_ref).with_context(|| format!("Failed to read demo file: {:?}", path_ref))?;
 
         let demo = Demo::new(&file_bytes);
         let mut stream = demo.get_stream();
-        let header = Header::read(&mut stream)
-            .with_context(|| "Failed to parse demo header from stream")?;
+        let header = Header::read(&mut stream).with_context(|| "Failed to parse demo header from stream")?;
 
         let mut server_name = String::new();
         let parser_state = ParserState::new(header.protocol, |_| true, false);
@@ -132,10 +122,11 @@ impl HeaderWindow {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "Unknown".to_string());
-        if let Some(data) = &self.data {
-            if data.file_name == fname && self.error.is_none() {
-                return;
-            }
+        if let Some(data) = &self.data
+            && data.file_name == fname
+            && self.error.is_none()
+        {
+            return;
         }
         match HeaderData::parse_file(path_ref) {
             Ok(data) => {
@@ -170,8 +161,6 @@ impl HeaderWindow {
             .max_size([540.0, 440.0])
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-
-
                 ui.spacing_mut().item_spacing.y = 6.0;
 
                 if let Some(err) = &self.error {
@@ -196,11 +185,7 @@ impl HeaderWindow {
                 ui.horizontal(|ui| {
                     ui.heading("Demo Information");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(&data.file_name)
-                                .monospace()
-                                .color(ui.visuals().weak_text_color()),
-                        );
+                        ui.label(egui::RichText::new(&data.file_name).monospace().color(ui.visuals().weak_text_color()));
                     });
                 });
                 ui.separator();
@@ -209,10 +194,7 @@ impl HeaderWindow {
                 let minutes = ((data.duration % 3600.0) / 60.0).floor() as u32;
                 let seconds = (data.duration % 60.0).floor() as u32;
                 let millis = ((data.duration % 1.0) * 1000.0).floor() as u32;
-                let formatted_duration = format!(
-                    "{:02}:{:02}:{:02}.{:03} ({:.2}s)",
-                    hours, minutes, seconds, millis, data.duration
-                );
+                let formatted_duration = format!("{:02}:{:02}:{:02}.{:03} ({:.2}s)", hours, minutes, seconds, millis, data.duration);
 
                 egui::Grid::new("header_info_grid")
                     .striped(true)
@@ -228,11 +210,7 @@ impl HeaderWindow {
                         });
                         ui.end_row();
 
-                        let s_name = if data.server_name.is_empty() {
-                            "Unknown"
-                        } else {
-                            &data.server_name
-                        };
+                        let s_name = if data.server_name.is_empty() { "Unknown" } else { &data.server_name };
                         ui.strong("Server Name:");
                         ui.horizontal(|ui| {
                             ui.add(egui::Label::new(s_name).wrap());

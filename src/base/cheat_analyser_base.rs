@@ -34,8 +34,10 @@ use web_time::Instant;
 
 use crate::dev_print;
 use crate::lib::algorithm::{CheatAlgorithm, Detection};
+#[cfg(feature = "parallel")]
 use crate::lib::algorithm_costs;
-use crate::util::helpers::{Vec3, ViewAngle, reconstruct_simtick};
+use crate::util::helpers::player_finders::{player_with_sid, valid_players};
+use crate::util::helpers::{FxHashMap, Vec3, ViewAngle, reconstruct_simtick};
 use crate::util::nocrex::jankguard::JankGuard;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
@@ -395,7 +397,7 @@ pub struct WeaponEntity {
 }
 
 impl WeaponEntity {
-    pub fn name(&self, player_class: Class) -> String {
+    pub fn name(&self, player_class: Class) -> &str {
         crate::util::helpers::weapon_name_from_id_or_class(self.item_def_index, &self.class_name, player_class)
     }
 }
@@ -404,15 +406,15 @@ impl WeaponEntity {
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct CheatAnalyserState {
     pub players: Vec<Player>,
-    pub player_names: HashMap<SteamID, String>,
-    pub user_info_history: HashMap<SteamID, UserInfo>,
-    pub entid_to_userid: HashMap<EntityId, UserId>,
-    pub userid_to_id64: HashMap<UserId, SteamID>,
+    pub player_names: FxHashMap<SteamID, String>,
+    pub user_info_history: FxHashMap<SteamID, UserInfo>,
+    pub entid_to_userid: FxHashMap<EntityId, UserId>,
+    pub userid_to_id64: FxHashMap<UserId, SteamID>,
     pub buildings: BTreeMap<EntityId, Building>,
-    pub weapons: HashMap<EntityId, WeaponEntity>,
+    pub weapons: FxHashMap<EntityId, WeaponEntity>,
     pub world: Option<World>,
-    pub friends_ids: HashMap<EntityId, u32>,
-    pub custom_files: HashMap<EntityId, [u32; 4]>,
+    pub friends_ids: FxHashMap<EntityId, u32>,
+    pub custom_files: FxHashMap<EntityId, [u32; 4]>,
     // pub kills: Vec<Kill>,
     pub tick: DemoTick,
     /// Server tick of the latest NetTick, the snapshot the current entity state belongs to.
@@ -420,7 +422,7 @@ pub struct CheatAnalyserState {
     pub server_tick: u32,
     /// Decoded simulation tick per player entity, see `sim_tick`.
     #[serde(skip)]
-    pub sim_ticks: HashMap<EntityId, i64>,
+    pub sim_ticks: FxHashMap<EntityId, i64>,
     /// Player entities whose simtime was received since the last NetTick.
     #[serde(skip)]
     pub simtime_received: Vec<EntityId>,
@@ -463,16 +465,9 @@ impl CheatAnalyserState {
         if let Some(name) = self.player_names.get(&sid) {
             return Some(name.as_str());
         }
-        for player in &self.players {
-            if let Some(info) = &player.info {
-                if let Ok(steam_id) = SteamID::from_steam3(&info.steam_id) {
-                    if steam_id == sid {
-                        return Some(info.name.as_str());
-                    }
-                }
-            }
-        }
-        None
+        valid_players(self.players.iter())
+            .find(|(_p, _i, s)| *s == sid)
+            .map(|(_p, i, _s)| i.name.as_str())
     }
 
     pub fn get_player_slot(&self, sid: SteamID) -> Option<u32> {
@@ -482,41 +477,35 @@ impl CheatAnalyserState {
                 return Some(ent - 1);
             }
         }
-        for player in &self.players {
-            if let Some(info) = &player.info {
-                if let Ok(steam_id) = SteamID::from_steam3(&info.steam_id) {
-                    if steam_id == sid {
-                        let ent = u32::from(player.entity);
-                        if ent > 0 {
-                            return Some(ent - 1);
-                        }
-                    }
-                }
+        if let Some((player, _info)) = player_with_sid(self.players.iter(), sid) {
+            let ent = u32::from(player.entity);
+            if ent > 0 {
+                return Some(ent - 1);
             }
         }
         for (ent, uid) in &self.entid_to_userid {
-            if let Some(&id64) = self.userid_to_id64.get(uid) {
-                if id64 == sid {
-                    let ent_num = u32::from(*ent);
-                    if ent_num > 0 {
-                        return Some(ent_num - 1);
-                    }
+            if let Some(&id64) = self.userid_to_id64.get(uid)
+                && id64 == sid
+            {
+                let ent_num = u32::from(*ent);
+                if ent_num > 0 {
+                    return Some(ent_num - 1);
                 }
             }
         }
         None
     }
 
-    pub fn get_player_weapon(&self, player: &Player) -> String {
+    pub fn get_player_weapon(&self, player: &Player) -> &str {
         if let Some(weapon_ent) = player.active_weapon
             && let Some(weapon) = self.weapons.get(&weapon_ent)
         {
             return weapon.name(player.class);
         }
-        "unknown".to_string()
+        "unknown"
     }
 
-    pub fn get_player_class_and_weapon_by_sid(&self, sid: SteamID) -> (&'static str, String) {
+    pub fn get_player_class_and_weapon_by_sid(&self, sid: SteamID) -> (&'static str, &str) {
         if let Some(player) = self
             .players
             .iter()
@@ -524,7 +513,7 @@ impl CheatAnalyserState {
         {
             (player.class_name(), self.get_player_weapon(player))
         } else {
-            ("unknown", "unknown".to_string())
+            ("unknown", "unknown")
         }
     }
 
@@ -775,12 +764,15 @@ pub struct CheatAnalyser {
     class_kinds: Vec<ClassKind>,       // indexed by ClassId
     prop_infos: PropInfoCache,
     handled_message_mask: u64,
-    algorithm_message_masks: Vec<u64>, // indexed like `algorithms`
     // Cost learning: algorithms are timed on one out of every SAMPLE_INTERVAL ticks.
+    #[cfg(feature = "parallel")]
     cost_sampling: bool,
+    #[cfg(feature = "parallel")]
     cost_sample_ticks: u32,
+    #[cfg(feature = "parallel")]
     algorithm_sampled_nanos: Vec<u64>, // indexed like `algorithms`
-    algorithm_finish_nanos: Vec<u64>,  // indexed like `algorithms`
+    #[cfg(feature = "parallel")]
+    algorithm_finish_nanos: Vec<u64>, // indexed like `algorithms`
 
     jankguard: JankGuard,
 }
@@ -800,10 +792,13 @@ impl Default for CheatAnalyser {
             class_kinds: Default::default(),
             prop_infos: Default::default(),
             handled_message_mask: message_mask(&BASE_MESSAGE_TYPES),
-            algorithm_message_masks: Default::default(),
+            #[cfg(feature = "parallel")]
             cost_sampling: false,
+            #[cfg(feature = "parallel")]
             cost_sample_ticks: 0,
+            #[cfg(feature = "parallel")]
             algorithm_sampled_nanos: Default::default(),
+            #[cfg(feature = "parallel")]
             algorithm_finish_nanos: Default::default(),
             jankguard: Default::default(),
         }
@@ -849,18 +844,24 @@ impl MessageHandler for CheatAnalyser {
                 if let Err(e) = self.jankguard.on_tick(&self.state) {
                     tracing::error!("{:?}", e);
                 };
+                #[cfg_attr(not(feature = "parallel"), expect(unused_variables))]
                 for (index, algorithm) in self.algorithms.iter_mut().enumerate() {
+                    #[cfg(feature = "parallel")]
                     let start = self.cost_sampling.then(Instant::now);
                     match algorithm.on_tick(&self.state, parser_state, &self.jankguard) {
                         Ok(detections) => self.detections.extend(detections),
-                        Err(_) => {}
+                        Err(e) => {
+                            tracing::error!("algorithm {:?} errored on tick: {:#?}", algorithm.algorithm_name(), e);
+                        }
                     }
+                    #[cfg(feature = "parallel")]
                     if let Some(start) = start {
                         self.algorithm_sampled_nanos[index] += start.elapsed().as_nanos() as u64;
                     }
                 }
                 self.state.user_cmds.clear();
                 self.state.console_cmds.clear();
+                #[cfg(feature = "parallel")]
                 if algorithm_costs::COST_LEARNING {
                     self.cost_sample_ticks = self.cost_sample_ticks.wrapping_add(1);
                     self.cost_sampling = self.cost_sample_ticks % algorithm_costs::SAMPLE_INTERVAL == 0;
@@ -907,15 +908,24 @@ impl MessageHandler for CheatAnalyser {
         }
         self.jankguard.on_message(message, &self.state, parser_state, _tick);
         let message_type = message.get_message_type();
+        #[cfg_attr(not(feature = "parallel"), expect(unused_variables))]
         for (index, algorithm) in self.algorithms.iter_mut().enumerate() {
-            if !mask_contains(self.algorithm_message_masks[index], message_type) {
+            // FIX: this is not letting through messages
+            // if !mask_contains(self.algorithm_message_masks[index], message_type) {
+            //     continue;
+            // }
+            if !algorithm.does_handle(message_type) {
                 continue;
             }
+            #[cfg(feature = "parallel")]
             let start = self.cost_sampling.then(Instant::now);
-            match algorithm.on_message(message, &self.state, &parser_state, &self.jankguard, _tick) {
+            match algorithm.on_message(message, &self.state, parser_state, &self.jankguard, _tick) {
                 Ok(detections) => self.detections.extend(detections),
-                Err(_) => {}
+                Err(e) => {
+                    tracing::error!("agorithm {:?} errored while parsing message: {:#?}", algorithm.algorithm_name(), e);
+                }
             }
+            #[cfg(feature = "parallel")]
             if let Some(start) = start {
                 self.algorithm_sampled_nanos[index] += start.elapsed().as_nanos() as u64;
             }
@@ -980,14 +990,17 @@ impl CheatAnalyser {
             .iter()
             .fold(message_mask(&BASE_MESSAGE_TYPES), |mask, algorithm_mask| mask | algorithm_mask);
 
+        #[cfg(feature = "parallel")]
         let algorithm_count = algorithms.len();
         let analyser = Self {
             algorithms,
             last_progress_update_time: Instant::now(),
             handled_message_mask,
-            algorithm_message_masks,
+            #[cfg(feature = "parallel")]
             cost_sampling: algorithm_costs::COST_LEARNING,
+            #[cfg(feature = "parallel")]
             algorithm_sampled_nanos: vec![0; algorithm_count],
+            #[cfg(feature = "parallel")]
             algorithm_finish_nanos: vec![0; algorithm_count],
             ..Default::default()
         };
@@ -1002,6 +1015,7 @@ impl CheatAnalyser {
 
     /// Estimated CPU time (seconds) spent in each algorithm, extrapolated from the sampled ticks.
     /// Only measured in builds that learn algorithm costs.
+    #[cfg(feature = "parallel")]
     pub fn measured_algorithm_costs(&self) -> Vec<(String, f64)> {
         self.algorithms
             .iter()
@@ -1033,9 +1047,12 @@ impl CheatAnalyser {
     }
 
     pub fn finish(&mut self) -> Result<(), Error> {
+        #[cfg_attr(not(feature = "parallel"), expect(unused_variables))]
         for (index, algorithm) in self.algorithms.iter_mut().enumerate() {
+            #[cfg(feature = "parallel")]
             let start = algorithm_costs::COST_LEARNING.then(Instant::now);
             let result = algorithm.finish();
+            #[cfg(feature = "parallel")]
             if let Some(start) = start {
                 self.algorithm_finish_nanos[index] += start.elapsed().as_nanos() as u64;
             }
@@ -1092,7 +1109,7 @@ impl CheatAnalyser {
         for detection in &self.detections {
             let algorithm = detection.algorithm;
             let steamid = detection.player;
-            *algorithm_counts.entry(algorithm).or_insert(HashMap::new()).entry(steamid).or_default() += 1;
+            *algorithm_counts.entry(algorithm).or_default().entry(steamid).or_default() += 1;
         }
 
         dev_print!("Total detections: {}", self.detections.len());
@@ -1108,7 +1125,7 @@ impl CheatAnalyser {
                 steamid_counts.values().sum::<usize>()
             );
             let mut steamid_counts_vec: Vec<_> = steamid_counts.into_iter().collect();
-            steamid_counts_vec.sort_by(|a, b| b.1.cmp(&a.1));
+            steamid_counts_vec.sort_by_key(|a| std::cmp::Reverse(a.1));
             for (steamid, count) in steamid_counts_vec {
                 dev_print!("    {}/{}: {}", u64::from(steamid), steamid.steam3(), count);
             }
@@ -1151,12 +1168,7 @@ impl CheatAnalyser {
         };
 
         if self.worker_id == 0 {
-            dev_print!(
-                "Processing tick {} ({} remaining, {:.0} tps)",
-                tick,
-                if total_ticks > tick { total_ticks - tick } else { 0 },
-                tps
-            );
+            dev_print!("Processing tick {} ({} remaining, {:.0} tps)", tick, total_ticks.saturating_sub(tick), tps);
         }
     }
 
@@ -1200,10 +1212,10 @@ impl CheatAnalyser {
 
         let mut item_def = None;
         for prop in props.iter() {
-            if prop_info(&mut self.prop_infos, prop.identifier).item_definition_index {
-                if let Ok(val) = i64::try_from(&prop.value) {
-                    item_def = Some(val as u16);
-                }
+            if prop_info(&mut self.prop_infos, prop.identifier).item_definition_index
+                && let Ok(val) = i64::try_from(&prop.value)
+            {
+                item_def = Some(val as u16);
             }
         }
         if item_def.is_some() || class_kind.is_weapon {
@@ -1251,10 +1263,10 @@ impl CheatAnalyser {
                 ResourceField::Ping => player.ping = i64::try_from(&prop.value).unwrap_or_default() as u16,
                 ResourceField::Other => {}
             }
-            if let Some(user_id) = user_id {
-                if self.state.entid_to_userid.get(&entity_id) != Some(&user_id) {
-                    self.state.set_entid_to_userid(entity_id, user_id);
-                }
+            if let Some(user_id) = user_id
+                && self.state.entid_to_userid.get(&entity_id) != Some(&user_id)
+            {
+                self.state.set_entid_to_userid(entity_id, user_id);
             }
         }
     }
@@ -1552,9 +1564,9 @@ impl CheatAnalyser {
             let ent_id = user_info.entity_id;
             self.state.friends_ids.insert(ent_id, user_info.player_info.friends_id);
             self.state.custom_files.insert(ent_id, user_info.player_info.custom_file);
-            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id.clone());
+            self.state.set_entid_to_userid(ent_id, user_info.player_info.user_id);
             if let Ok(steam_id) = SteamID::from_steam3(&user_info.player_info.steam_id) {
-                self.state.set_userid_to_id64(user_info.player_info.user_id.clone(), steam_id);
+                self.state.set_userid_to_id64(user_info.player_info.user_id, steam_id);
                 if !user_info.player_info.name.is_empty() {
                     self.state.player_names.insert(steam_id, user_info.player_info.name.clone());
                 }

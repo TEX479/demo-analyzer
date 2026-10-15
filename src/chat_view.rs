@@ -1,20 +1,20 @@
-use std::collections::HashMap;
-use std::path::Path;
 use anyhow::{Context, Result};
 use bitbuffer::BitRead;
 #[cfg(feature = "gui")]
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::DemoTick;
 use tf_demo_parser::demo::header::Header;
-use tf_demo_parser::demo::message::usermessage::{ChatMessageKind, UserMessage};
 use tf_demo_parser::demo::message::Message;
+use tf_demo_parser::demo::message::packetentities::EntityId;
+use tf_demo_parser::demo::message::usermessage::{ChatMessageKind, UserMessage};
 use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::handler::BorrowMessageHandler;
 use tf_demo_parser::demo::parser::{MessageHandler, RawPacketStream};
-use tf_demo_parser::demo::message::packetentities::EntityId;
 
 use tf_demo_parser::{Demo, MessageType, ParserState, ReadResult, Stream};
 
@@ -77,63 +77,67 @@ impl MessageHandler for ChatParser {
 
     fn handle_message(&mut self, message: &Message, tick: DemoTick, _parser_state: &ParserState) {
         self.current_tick = tick.into();
-        match message {
-            Message::UserMessage(user_msg) => match user_msg {
-                UserMessage::SayText2(say) => {
-                    let kind_str = format!("{:?}", say.kind);
-                    let (chat_type, is_relevant) = match say.kind {
-                        ChatMessageKind::ChatAll => ("All".to_string(), true),
-                        ChatMessageKind::ChatAllDead => ("All (Dead)".to_string(), true),
-                        ChatMessageKind::ChatTeam => ("Team".to_string(), true),
-                        ChatMessageKind::ChatTeamDead => ("Team (Dead)".to_string(), true),
-                        ChatMessageKind::ChatAllSpec => ("Spec".to_string(), true),
-                        ChatMessageKind::Empty => {
-                            // Some TF2 server mods use Empty with formatted text
-                            ("All".to_string(), true)
-                        }
-                        _ => {
-                            if kind_str.contains("All") {
-                                ("All".to_string(), true)
-                            } else if kind_str.contains("Team") {
-                                ("Team".to_string(), true)
-                            } else {
-                                (kind_str, false)
-                            }
-                        }
-                    };
-
-                    if is_relevant {
-                        let from_name = say.from.as_ref().map(|s| s.to_string()).unwrap_or_else(|| {
-                            self.entid_to_name
-                                .get(&say.client)
-                                .cloned()
-                                .unwrap_or_else(|| format!("Player {}", u32::from(say.client)))
-                        });
-
-                        let from_steam_id = self.entid_to_steam_id.get(&say.client).copied();
-
-                        let mut text = say.text.to_string();
-                        // Clean up leading color codes or control chars if any
-                        if text.starts_with('\x01') || text.starts_with('\x02') || text.starts_with('\x03') || text.starts_with('\x04') {
-                            text = text.trim_start_matches(|c: char| c.is_control() || c as u32 <= 4).to_string();
-                        }
-
-                        self.messages.push(ChatMessage {
-                            tick: self.current_tick,
-                            chat_type,
-                            from_name,
-                            from_steam_id,
-                            message: text,
-                        });
-                    }
+        let Message::UserMessage(user_msg) = message else {
+            return;
+        };
+        let UserMessage::SayText2(say) = user_msg else {
+            return;
+        };
+        let kind_str = format!("{:?}", say.kind);
+        let (chat_type, is_relevant) = match say.kind {
+            ChatMessageKind::ChatAll => ("All".to_string(), true),
+            ChatMessageKind::ChatAllDead => ("All (Dead)".to_string(), true),
+            ChatMessageKind::ChatTeam => ("Team".to_string(), true),
+            ChatMessageKind::ChatTeamDead => ("Team (Dead)".to_string(), true),
+            ChatMessageKind::ChatAllSpec => ("Spec".to_string(), true),
+            ChatMessageKind::Empty => {
+                // Some TF2 server mods use Empty with formatted text
+                ("All".to_string(), true)
+            }
+            _ => {
+                if kind_str.contains("All") {
+                    ("All".to_string(), true)
+                } else if kind_str.contains("Team") {
+                    ("Team".to_string(), true)
+                } else {
+                    (kind_str, false)
                 }
-                _ => {}
-            },
-            _ => {}
+            }
+        };
+
+        if !is_relevant {
+            return;
         }
+
+        let from_name = say.from.as_ref().map(|s| s.to_string()).unwrap_or_else(|| {
+            self.entid_to_name
+                .get(&say.client)
+                .cloned()
+                .unwrap_or_else(|| format!("Player {}", u32::from(say.client)))
+        });
+
+        let from_steam_id = self.entid_to_steam_id.get(&say.client).copied();
+
+        let mut text = say.text.to_string();
+        // Clean up leading color codes or control chars if any
+        if text.starts_with('\x01')
+            || text.starts_with('\x02')
+            || text.starts_with('\x03')
+            || text.starts_with('\x04')
+        {
+            text = text
+                .trim_start_matches(|c: char| c.is_control() || c as u32 <= 4)
+                .to_string();
+        }
+
+        self.messages.push(ChatMessage {
+            tick: self.current_tick,
+            chat_type,
+            from_name,
+            from_steam_id,
+            message: text,
+        });
     }
-
-
 
     fn handle_string_entry(
         &mut self,
@@ -179,8 +183,7 @@ pub fn parse_chat<P: AsRef<Path>>(path: P) -> Result<Vec<ChatMessage>> {
 
     let demo = Demo::new(&file_bytes);
     let mut stream = demo.get_stream();
-    let header: Header = Header::read(&mut stream)
-        .with_context(|| "Failed to read demo header")?;
+    let header: Header = Header::read(&mut stream).with_context(|| "Failed to read demo header")?;
     let mut packets = RawPacketStream::new(stream);
 
     let parser = ChatParser::new();
@@ -212,8 +215,8 @@ pub struct ChatWindow {
 }
 
 #[cfg(feature = "gui")]
-impl ChatWindow {
-    pub fn new() -> Self {
+impl Default for ChatWindow {
+    fn default() -> Self {
         Self {
             messages: Vec::new(),
             is_loading: false,
@@ -223,6 +226,13 @@ impl ChatWindow {
             filter_type: "All Types".to_string(),
             recv: None,
         }
+    }
+}
+
+#[cfg(feature = "gui")]
+impl ChatWindow {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn open_for_file<P: AsRef<Path>>(&mut self, path: P) {
@@ -246,20 +256,20 @@ impl ChatWindow {
             return;
         }
 
-        if let Some(recv) = &self.recv {
-            if let Ok(res) = recv.try_recv() {
-                self.is_loading = false;
-                match res {
-                    Ok(msgs) => {
-                        self.messages = msgs;
-                        self.error = None;
-                    }
-                    Err(e) => {
-                        self.error = Some(format!("{:#}", e));
-                    }
+        if let Some(recv) = &self.recv
+            && let Ok(res) = recv.try_recv()
+        {
+            self.is_loading = false;
+            match res {
+                Ok(msgs) => {
+                    self.messages = msgs;
+                    self.error = None;
                 }
-                self.recv = None;
+                Err(e) => {
+                    self.error = Some(format!("{:#}", e));
+                }
             }
+            self.recv = None;
         }
 
         let mut is_open = self.is_open;
@@ -273,7 +283,10 @@ impl ChatWindow {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 if let Some(err) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(235, 70, 70), format!("Error: {}", err));
+                    ui.colored_label(
+                        egui::Color32::from_rgb(235, 70, 70),
+                        format!("Error: {}", err),
+                    );
                     ui.add_space(8.0);
                     if ui.button("Close").clicked() {
                         self.is_open = false;
@@ -304,9 +317,21 @@ impl ChatWindow {
                     egui::ComboBox::from_label("Type")
                         .selected_text(&self.filter_type)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.filter_type, "All Types".to_string(), "All Types");
-                            ui.selectable_value(&mut self.filter_type, "All".to_string(), "All Chat");
-                            ui.selectable_value(&mut self.filter_type, "Team".to_string(), "Team Chat");
+                            ui.selectable_value(
+                                &mut self.filter_type,
+                                "All Types".to_string(),
+                                "All Types",
+                            );
+                            ui.selectable_value(
+                                &mut self.filter_type,
+                                "All".to_string(),
+                                "All Chat",
+                            );
+                            ui.selectable_value(
+                                &mut self.filter_type,
+                                "Team".to_string(),
+                                "Team Chat",
+                            );
                         });
 
                     ui.add_space(10.0);
@@ -365,10 +390,12 @@ impl ChatWindow {
                                     };
                                     ui.colored_label(type_color, &msg.chat_type);
 
-                                    let name_label = ui.with_layout(
-                                        egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| ui.selectable_label(false, &msg.from_name),
-                                    ).inner;
+                                    let name_label = ui
+                                        .with_layout(
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                            |ui| ui.selectable_label(false, &msg.from_name),
+                                        )
+                                        .inner;
                                     name_label.context_menu(|ui| {
                                         if ui.button("Copy Ingame Name").clicked() {
                                             ui.ctx().copy_text(msg.from_name.clone());
@@ -398,7 +425,8 @@ impl ChatWindow {
 
                                     ui.scope(|ui| {
                                         ui.set_max_width(240.0);
-                                        let msg_label = ui.add(egui::Label::new(&msg.message).wrap());
+                                        let msg_label =
+                                            ui.add(egui::Label::new(&msg.message).wrap());
                                         msg_label.context_menu(|ui| {
                                             if ui.button("Copy Message Content").clicked() {
                                                 ui.ctx().copy_text(msg.message.clone());
@@ -416,7 +444,6 @@ impl ChatWindow {
                             });
                     });
 
-
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("Right-click any player or message to copy");
@@ -431,4 +458,3 @@ impl ChatWindow {
         self.is_open = is_open;
     }
 }
-

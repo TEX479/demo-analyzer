@@ -578,7 +578,7 @@ impl CheatAlgorithm for NoSpread {
                 }
                 let weapon_name = state.get_player_weapon(player);
                 let class_name = player.class_name();
-                let weapon_info = get_weapon_spread_info(weapon_id, &weapon_name, class_name);
+                let weapon_info = get_weapon_spread_info(weapon_id, weapon_name, class_name);
 
                 let tracker = self.player_trackers.entry(steam_id).or_default();
                 tracker.current_weapon = weapon_info;

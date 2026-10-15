@@ -1,4 +1,5 @@
-#![warn(clippy::panic, clippy::todo, clippy::unwrap_used)]
+#![warn(clippy::todo)]
+#![deny(clippy::panic, clippy::unwrap_used)]
 
 use std::sync::atomic::AtomicU32;
 pub mod base {
@@ -12,6 +13,9 @@ pub mod playerlist_view;
 #[cfg(feature = "rcon")]
 pub mod rcon;
 
+#[cfg(feature = "static_algorithms_module")]
+pub mod algorithms;
+#[cfg(not(feature = "static_algorithms_module"))]
 pub mod algorithms {
     // Stable and experimental modules are auto-discovered by build.rs at compile time.
     // To add, remove, or move an algorithm between folders, simply place its .rs file
@@ -23,7 +27,8 @@ pub mod algorithms {
 }
 
 pub mod util {
-    pub mod bsp;
+    // bsp module is not being used, thus it can be deactivated
+    // pub mod bsp;
     pub mod datatable_validator;
     pub mod helpers;
     pub mod schema_equip_regions;
@@ -34,6 +39,7 @@ pub mod util {
 
 pub mod lib {
     pub mod algorithm;
+    #[cfg(feature = "parallel")]
     pub mod algorithm_costs;
     #[cfg(has_experimental_exclusions)]
     pub mod excluded_algorithms_experimental;

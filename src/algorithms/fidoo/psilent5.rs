@@ -349,7 +349,7 @@ impl CheatAlgorithm for Psilent5 {
             };
 
             let weapon_name = state.get_player_weapon(player);
-            if is_excluded_weapon(&weapon_name) {
+            if is_excluded_weapon(weapon_name) {
                 continue;
             }
             let pipe_type = projectile_integer(&props, &[("DT_TFProjectile_Pipebomb", "m_iType")]);
@@ -380,7 +380,7 @@ impl CheatAlgorithm for Psilent5 {
                 tick,
                 player: owner_steam_id,
                 player_class: player.class,
-                weapon_name,
+                weapon_name: weapon_name.to_owned(),
                 player_ping: player.ping,
                 projectile: class.to_string(),
                 projectile_entity: entity.entity_index.into(),

@@ -49,22 +49,22 @@ impl GeneralSettings {
             let key = k.to_lowercase().replace(' ', "_");
             match key.as_str() {
                 "global_sliding_window_enabled" => {
-                    if let Ok(b) = v.clone().try_into() {
+                    if let Ok(b) = (*v).try_into() {
                         settings.global_sliding_window_enabled = b;
                     }
                 }
                 "sliding_window_ticks" => {
-                    if let Ok(i) = v.clone().try_into() {
+                    if let Ok(i) = (*v).try_into() {
                         settings.sliding_window_ticks = i;
                     }
                 }
                 "sliding_window_detections" => {
-                    if let Ok(i) = v.clone().try_into() {
+                    if let Ok(i) = (*v).try_into() {
                         settings.sliding_window_detections = i;
                     }
                 }
                 "per_algorithm" => {
-                    if let Ok(b) = v.clone().try_into() {
+                    if let Ok(b) = (*v).try_into() {
                         settings.per_algorithm = b;
                     }
                 }
@@ -156,7 +156,7 @@ impl GeneralSettings {
             let mut qualified_players = HashSet::new();
 
             for d in detections {
-                if is_excluded_from_sliding_window(&d.algorithm) {
+                if is_excluded_from_sliding_window(d.algorithm) {
                     // Excluded algorithm detections immediately qualify the player
                     qualified_players.insert(d.player);
                 }
@@ -181,14 +181,14 @@ impl GeneralSettings {
 
             detections
                 .iter()
-                .filter(|d| is_excluded_from_sliding_window(&d.algorithm) || qualified_players.contains(&d.player))
+                .filter(|d| is_excluded_from_sliding_window(d.algorithm) || qualified_players.contains(&d.player))
                 .cloned()
                 .collect()
         } else {
             // Group by (player, algorithm)
             let mut group_ticks: HashMap<(SteamID, &str), Vec<u32>> = HashMap::new();
             for d in detections {
-                if !is_excluded_from_sliding_window(&d.algorithm) {
+                if !is_excluded_from_sliding_window(d.algorithm) {
                     group_ticks.entry((d.player, d.algorithm)).or_default().push(d.tick);
                 }
             }
@@ -209,7 +209,7 @@ impl GeneralSettings {
 
             detections
                 .iter()
-                .filter(|d| is_excluded_from_sliding_window(&d.algorithm) || qualified_groups.contains(&(d.player, d.algorithm.clone())))
+                .filter(|d| is_excluded_from_sliding_window(d.algorithm) || qualified_groups.contains(&(d.player, d.algorithm)))
                 .cloned()
                 .collect()
         }

@@ -920,7 +920,10 @@ impl PlainAimbot {
             .collect();
         let mut results = Vec::new();
         for target in finished {
-            let (lag, run) = pdata.pending_locks.remove(&target).unwrap();
+            let (lag, run) = pdata
+                .pending_locks
+                .remove(&target)
+                .expect("any target in finished must exist in pdata.pending_locks");
             results.push(json!({
                 "type": "lock",
                 "tick": run.start_tick,
@@ -992,10 +995,8 @@ impl CheatAlgorithm for PlainAimbot {
             let fired = tick > 0 && jg.fired(&sid, tick) == 0;
             let sim_tick = state.sim_tick(player);
             if pdata.last_sim_tick == Some(sim_tick) {
-                if fired {
-                    if let Some(s) = pdata.samples.back_mut() {
-                        s.fired = true;
-                    }
+                if fired && let Some(s) = pdata.samples.back_mut() {
+                    s.fired = true;
                 }
                 continue;
             }
@@ -1014,8 +1015,8 @@ impl CheatAlgorithm for PlainAimbot {
             let weapon = state.get_player_weapon(player);
             let model = *self
                 .weapon_models
-                .entry(weapon.clone())
-                .or_insert_with(|| Self::aim_model(&weapon, cfg.projectile_model));
+                .entry(weapon.to_owned())
+                .or_insert_with(|| Self::aim_model(weapon, cfg.projectile_model));
             let since_spawn = jg.spawned(&sid, tick).min(jg.teleported(&sid, tick));
             if since_spawn < cfg.spawn_grace_ticks || player.is_taunting() || model == AimModel::Excluded {
                 pdata.samples.clear();
@@ -1033,12 +1034,12 @@ impl CheatAlgorithm for PlainAimbot {
                 team: player.team as u8,
                 fired,
                 model,
-                melee: Self::is_melee(&weapon),
+                melee: Self::is_melee(weapon),
             });
             if pdata.samples.len() > SAMPLE_HISTORY {
                 pdata.samples.pop_front();
             }
-            updated_players.push((sid, player.class_name(), weapon));
+            updated_players.push((sid, player.class_name(), weapon.to_owned()));
         }
 
         // 2. Run the checks for every player with a new sample
@@ -1063,10 +1064,10 @@ impl CheatAlgorithm for PlainAimbot {
                 if let Some(v) = Self::check_snap(&cfg, &pdata.samples, &targets) {
                     found.push(("snap", v));
                 }
-                if cfg.check_corner {
-                    if let Some(v) = Self::check_corner(&cfg, &pdata.samples, &targets) {
-                        found.push(("corner", v));
-                    }
+                if cfg.check_corner
+                    && let Some(v) = Self::check_corner(&cfg, &pdata.samples, &targets)
+                {
+                    found.push(("corner", v));
                 }
                 if cfg.check_lock {
                     for v in Self::update_locks(&cfg, &mut pdata, &targets) {

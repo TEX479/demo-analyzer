@@ -25,7 +25,7 @@
 
 // TODO: refactor more
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use anyhow::Error;
 use serde_json::json;
@@ -39,7 +39,7 @@ use crate::lib::algorithm::{CheatAlgorithm, Detection};
 use crate::lib::parameters::AlgorithmParameters;
 use crate::make_algorithm_params;
 use crate::util::helpers::player_finders::valid_players;
-use crate::util::helpers::{Vec3, ViewAngle};
+use crate::util::helpers::{FxHashMap, Vec3, ViewAngle};
 use crate::util::nocrex::jankguard::JankGuard;
 
 const SAMPLE_HISTORY: usize = 8;
@@ -99,10 +99,11 @@ struct PlayerData {
 #[derive(Default)]
 pub struct PyroAimbot {
     params: Parameters,
-    players: HashMap<SteamID, PlayerData>,
+    players: FxHashMap<SteamID, PlayerData>,
     /// Flame thrower damage dealt per attacker: (tick, victim)
-    flame_hits: HashMap<SteamID, VecDeque<(Tick, SteamID)>>,
+    flame_hits: FlameHits,
 }
+type FlameHits = FxHashMap<SteamID, VecDeque<(Tick, SteamID)>>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Parameters {
@@ -239,15 +240,21 @@ fn aim_error(sample: &Sample, positions: &VecDeque<PositionRecord>, max_lag: u32
     best
 }
 
-impl PyroAimbot {
-    pub fn new() -> Self {
-        Self::default()
-    }
+/// Ticks from the corner to the closest flame hit of `attacker` within the hit window.
+fn hit_offset(flame_hits: &FlameHits, attacker: SteamID, corner_tick: Tick, window: u32) -> Option<i64> {
+    flame_hits
+        .get(&attacker)?
+        .iter()
+        .map(|&(t, _)| t as i64 - corner_tick as i64)
+        .filter(|dt| dt.unsigned_abs() <= window as u64)
+        .min_by_key(|dt| dt.abs())
+}
 
-    fn reset(pdata: &mut PlayerData) {
-        pdata.samples.clear();
-        pdata.positions.clear();
-        pdata.last_sim_tick = None;
+impl PlayerData {
+    fn reset(&mut self) {
+        self.samples.clear();
+        self.positions.clear();
+        self.last_sim_tick = None;
     }
 }
 
@@ -339,6 +346,10 @@ struct Target<'p> {
 }
 
 impl PyroAimbot {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Corner shape of X -> Y -> Z: both steps (yaw scaled to arc length) and the turn between them
     /// are large. Returns (step1, step2, turn, speed), speed being the slower step in degrees per
     /// simulated tick (choked usercmds cover several ticks).
@@ -455,15 +466,7 @@ impl PyroAimbot {
         }))
     }
 
-    /// Ticks from the corner to the closest flame hit of `attacker` within the hit window.
-    fn hit_offset(&self, attacker: SteamID, corner_tick: u32, window: u32) -> Option<i64> {
-        self.flame_hits
-            .get(&attacker)?
-            .iter()
-            .map(|&(t, _)| t as i64 - corner_tick as i64)
-            .filter(|dt| dt.unsigned_abs() <= window as u64)
-            .min_by_key(|dt| dt.abs())
-    }
+    const ALGORITHM_NAME: &'static str = "fidoo/pyro_aimbot";
 }
 
 impl CheatAlgorithm for PyroAimbot {
@@ -472,7 +475,7 @@ impl CheatAlgorithm for PyroAimbot {
     }
 
     fn algorithm_name(&self) -> &'static str {
-        "fidoo/pyro_aimbot"
+        Self::ALGORITHM_NAME
     }
 
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
@@ -517,16 +520,16 @@ impl CheatAlgorithm for PyroAimbot {
         for (player, _info, sid) in valid_players(state.players.iter()) {
             let pdata = self.players.entry(sid).or_default();
             if !player.in_pvs || player.state != PlayerState::Alive {
-                Self::reset(pdata);
+                pdata.reset();
                 continue;
             }
             if pdata.last_seen_tick > 0 && tick.saturating_sub(pdata.last_seen_tick) > 16 {
-                Self::reset(pdata);
+                pdata.reset();
             }
             if let Some(last) = pdata.positions.back() {
                 let d = player.position - last.position;
                 if d.x * d.x + d.y * d.y + d.z * d.z > TELEPORT_DIST_SQ {
-                    Self::reset(pdata);
+                    pdata.reset();
                 }
             }
             pdata.last_seen_tick = tick;
@@ -585,7 +588,7 @@ impl CheatAlgorithm for PyroAimbot {
                     })
                 })
                 .collect();
-            if let Some(data) = Self::check_corner(&cfg, &pdata.samples, &targets) {
+            if let Some(data) = Self::check_corner(cfg, &pdata.samples, &targets) {
                 let corner_tick = data["tick"].as_u64().unwrap_or(tick as u64) as u32;
                 pdata.pending.push_back(PendingCorner { corner_tick, data });
             }
@@ -595,21 +598,16 @@ impl CheatAlgorithm for PyroAimbot {
 
         // 3. Finalize corners once the flame hits after them have arrived
         let mut out = Vec::new();
-        let sids: Vec<SteamID> = self.players.iter().filter(|(_, d)| !d.pending.is_empty()).map(|(s, _)| *s).collect();
-        for sid in sids {
-            loop {
-                let pdata = self.players.get_mut(&sid).unwrap();
-                let Some(front) = pdata.pending.front() else { break };
-                if tick < front.corner_tick + cfg.hit_window_ticks {
+        for (&sid, pdata) in self.players.iter_mut().filter(|(_, d)| !d.pending.is_empty()) {
+            while let Some(PendingCorner { corner_tick, mut data }) = pdata.pending.pop_front() {
+                if tick < corner_tick + cfg.hit_window_ticks {
                     break;
                 }
-                let PendingCorner { corner_tick, mut data } = pdata.pending.pop_front().unwrap();
-                let hit = self.hit_offset(sid, corner_tick, cfg.hit_window_ticks);
+                let hit = hit_offset(&self.flame_hits, sid, corner_tick, cfg.hit_window_ticks);
                 // Oscillations show the aim stream itself and need no hit
                 if cfg.require_hit && hit.is_none() && data["type"] == "corner" {
                     continue;
                 }
-                let pdata = self.players.get_mut(&sid).unwrap();
                 if pdata
                     .last_detection
                     .is_some_and(|last| corner_tick.saturating_sub(last) < cfg.min_detection_spacing)
@@ -623,7 +621,7 @@ impl CheatAlgorithm for PyroAimbot {
                 data["weapon"] = json!(weapon);
                 out.push(Detection {
                     tick: corner_tick,
-                    algorithm: self.algorithm_name(),
+                    algorithm: Self::ALGORITHM_NAME,
                     player: sid,
                     data,
                 });
