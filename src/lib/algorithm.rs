@@ -192,10 +192,14 @@ pub fn analyse_sequential_with_worker_id(demo: &Demo, algorithms: Vec<Box<dyn Ch
 }
 
 pub trait CheatAlgorithm {
+    /// wether or not this algorithm is enabled by default
+    ///
+    /// set this to false, if for example your algorithm for is either experimental or is very slow.
     fn enabled_by_default(&self) -> bool;
 
     fn algorithm_name(&self) -> &'static str;
 
+    // TODO: remove `Option` as the HashMap can just be empty
     fn params(&mut self) -> Option<AlgorithmParameters<'_>> {
         None
     }
@@ -207,13 +211,14 @@ pub trait CheatAlgorithm {
         }
     }
 
-    // Called before any other events
-    // Use this instead of ::new() when performing any non-ephemeral actions e.g. modifying files
+    /// Called before any other events
+    ///
+    /// Use this instead of ::new() when performing any non-ephemeral actions e.g. modifying files
     fn init(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
-    // Called for each tick. Passes the basic game state for the tick
+    /// Called for each tick. Passes the basic game state for the tick
     // Try the write_to_file algorithm to see what those states look like (there is one state per line)
     // cargo run -- -i demo.dem -a write_to_file
     fn on_tick(&mut self, _state: &CheatAnalyserState, _parser_state: &ParserState, _jg: &JankGuard) -> Result<Vec<Detection>, Error> {
@@ -227,8 +232,8 @@ pub trait CheatAlgorithm {
         Err(false)
     }
 
-    // Called for each message received by the parser.
-    // Only called for types specified in handled_messages.
+    /// Called for each message received by the parser.
+    /// Only called for types specified in handled_messages.
     fn on_message(
         &mut self,
         _message: &Message,
@@ -240,8 +245,8 @@ pub trait CheatAlgorithm {
         Ok(vec![])
     }
 
-    // Called after all other events
-    // Use for cleaning up or for aggregate analysis
+    /// Called after all other events
+    /// Use for cleaning up or for aggregate analysis
     fn finish(&mut self) -> Result<Vec<Detection>, Error> {
         Ok(vec![])
     }

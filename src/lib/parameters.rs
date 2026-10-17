@@ -3,6 +3,9 @@ use std::{collections::HashMap, fmt::Display};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+/// an enum that holds mutable references to parameters of an algorithm
+///
+/// can not be serialized or cloned. use `SerializableParameter` for that
 #[derive(Debug)]
 pub enum AlgorithmParameter<'a> {
     Float32(&'a mut f32),
@@ -12,6 +15,9 @@ pub enum AlgorithmParameter<'a> {
     Unsigned32(&'a mut u32),
 }
 
+/// an enum equivalent to `AlgorithmParameter` but with owned data
+///
+/// This can be serialized, cloned, etc. because the data is owned.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SerializableParameter {
     Float32(f32),
@@ -55,12 +61,13 @@ impl_display!(Float32, Int32, Bool, Usize, Unsigned32);
 
 impl std::error::Error for ParameterError {}
 
+/// Maps parameter names to an algorithm's values
 pub type AlgorithmParameters<'a> = HashMap<String, AlgorithmParameter<'a>>;
 
-// Maps parameter names to their values.
+/// Maps parameter names to their owned values.
 pub type SerializableParameters = HashMap<String, SerializableParameter>;
 
-// Maps algorithm names to their parameters.
+/// Maps algorithm names to their parameters.
 pub type Config = HashMap<String, SerializableParameters>;
 
 impl<'a> AlgorithmParameter<'a> {
@@ -89,6 +96,10 @@ impl<'a> AlgorithmParameter<'a> {
     }
 }
 
+/// tries to get a parameters value
+///
+/// This is only here for backwards compatibility with old algos.
+/// It is recommended to just interact with the structs/enums themselves.
 pub fn get_parameter_value<T>(params: &SerializableParameters, param_name: &str) -> anyhow::Result<T>
 where
     T: for<'a> TryFrom<&'a SerializableParameter, Error = ParameterError>,
@@ -207,6 +218,45 @@ impl_from_both_ways!(
     [(i32, Int32), (f32, Float32), (bool, Bool), (usize, Usize), (u32, Unsigned32)]
 );
 
+/// helper macro for creating `AlgorithmParameters` object from a struct
+///
+/// # Example
+/// ```
+/// # use analysis_template::make_algorithm_params;
+/// # use analysis_template::lib::parameters::{AlgorithmParameters, AlgorithmParameter};
+/// // This struct could be the algorithm's struct or a special parameters struct
+/// struct SomeStruct {
+///     a_toggle: bool,
+///     some_specific_value: f32,
+///     a_maximum_count: u32,
+///     
+///     some_other_val: u32,
+/// }
+///
+/// let mut some_struct = SomeStruct {
+///     a_toggle: true,
+///     some_specific_value: 12.34,
+///     a_maximum_count: 69,
+///     some_other_val: 42,
+/// };
+/// let algorithm_params: AlgorithmParameters<'_> = make_algorithm_params!(
+///     // the variable, off which to take fields
+///     // must be mutable
+///     some_struct;
+///
+///     // a list of fields to convert to `AlgorithmParameter`s
+///     // they will be inserted into the `AlgorithmParameters` with the name of that field
+///     [
+///         a_toggle,
+///         some_specific_value,
+///         a_maximum_count,
+///     ]
+/// );
+/// assert!(matches!(algorithm_params.get("a_toggle"), Some(&AlgorithmParameter::Bool(&mut true))));
+/// assert!(matches!(algorithm_params.get("some_specific_value"), Some(&AlgorithmParameter::Float32(&mut 12.34))));
+/// assert!(matches!(algorithm_params.get("a_maximum_count"), Some(&AlgorithmParameter::Unsigned32(&mut 69))));
+/// assert!(matches!(algorithm_params.get("some_other_val"), None));
+/// ```
 #[macro_export]
 macro_rules! make_algorithm_params {
     ($base_struct:expr; [$($name:ident),+ $(,)?] $(,)?) => {{
