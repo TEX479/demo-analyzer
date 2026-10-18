@@ -181,21 +181,21 @@ macro_rules! giant_maker_macro {
 
 giant_maker_macro!(
     (Bool, bool),
-    (Int8, i8),
-    (Int16, i16),
+    // (Int8, i8),
+    // (Int16, i16),
     (Int32, i32),
     (Int64, i64),
-    (Int128, i128),
+    // (Int128, i128),
     (Unsigned8, u8),
-    (Unsigned16, u16),
+    // (Unsigned16, u16),
     (Unsigned32, u32),
     (Unsigned64, u64),
-    (Unsigned128, u128),
-    (Isize, isize),
+    // (Unsigned128, u128),
+    // (Isize, isize),
     (Usize, usize),
     (Float32, f32),
     (Float64, f64),
-    (Char, char),
+    // (Char, char),
 );
 
 /// helper macro for creating `AlgorithmParameters` object from a struct

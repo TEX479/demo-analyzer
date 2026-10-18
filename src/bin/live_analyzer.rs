@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use analysis_template::{
     SILENT,
     lib::{
@@ -5,10 +7,8 @@ use analysis_template::{
         parameters::{Config, try_update_algorithm_params},
     },
     live_analyzer::live_analysis,
+    util::helpers::locate_tf2_folder,
 };
-use anyhow::Context;
-use std::{path::PathBuf, sync::LazyLock};
-use steamlocate::SteamDir;
 use tracing::Level;
 
 fn main() {
@@ -43,17 +43,6 @@ fn main() {
             tracing::error!("live_analysis terminated with {:?}", e);
         }
     }
-}
-
-const TF2_GAME_ID: u32 = 440;
-
-fn locate_tf2_folder() -> anyhow::Result<PathBuf> {
-    let (app, library) = SteamDir::locate()
-        .context("Failed to locate Steam directory")?
-        .find_app(TF2_GAME_ID)
-        .context("Failed to locate TF2 installation.")?
-        .ok_or_else(|| anyhow::anyhow!("Failed to locate TF2 installation."))?;
-    Ok(library.resolve_app_dir(&app))
 }
 
 fn get_desired_algorithms() -> Vec<Box<dyn CheatAlgorithm + Send>> {

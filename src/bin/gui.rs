@@ -199,16 +199,28 @@ impl eframe::App for Gui {
                                         SerializableParameter::Float32(f) => {
                                             ui.add(egui::DragValue::new(f).speed(0.001).max_decimals(50));
                                         }
-                                        SerializableParameter::Int32(i) => {
-                                            ui.add(egui::DragValue::new(i).speed(1).max_decimals(0));
+                                        SerializableParameter::Float64(f) => {
+                                            ui.add(egui::DragValue::new(f).speed(0.001).max_decimals(50));
                                         }
                                         SerializableParameter::Bool(b) => {
                                             ui.checkbox(b, "");
                                         }
+                                        SerializableParameter::Int32(v) => {
+                                            ui.add(egui::DragValue::new(v).speed(1));
+                                        }
+                                        SerializableParameter::Int64(v) => {
+                                            ui.add(egui::DragValue::new(v).speed(1));
+                                        }
                                         SerializableParameter::Usize(v) => {
                                             ui.add(egui::DragValue::new(v).speed(1));
                                         }
+                                        SerializableParameter::Unsigned8(v) => {
+                                            ui.add(egui::DragValue::new(v).speed(1));
+                                        }
                                         SerializableParameter::Unsigned32(v) => {
+                                            ui.add(egui::DragValue::new(v).speed(1));
+                                        }
+                                        SerializableParameter::Unsigned64(v) => {
                                             ui.add(egui::DragValue::new(v).speed(1));
                                         }
                                     }
