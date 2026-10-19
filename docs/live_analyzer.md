@@ -11,9 +11,10 @@ This will place the binary into `<project root folder>/target/release/live_analy
 Running the binary will make it start checking the `<path to TF2>/tf/demos` folder and analyse any demos that are being written there. 
 Any detections will be printed to the console as a warning.
 
-The binary can take one optional argument, being [a json parameter file](params.md):
-```sh
-live_analyzer params.json
-```
-The file can be generated using [the gui](gui.md) or by just creating [a matching json file](params.md).
+## Launch Options
+`-p` or `--params` followed by a path can be used to specify [a json file to configure the algorithms parameters](params.md).
 
+`-d` or `--demo-path` followed by a path can be used to specify the folder which the program will watch for demos to analyse.
+
+`-a` or `--algorithm` with an algorithm's name as next arg can be used to specify which algorithm's to run (use multiple `-a`/`--algorithm` calls for multiple algorithms).  
+If not specified, only algorithms with `enabled_by_default()` being `true` are ran.
